@@ -14,6 +14,8 @@ func (c *dbConn) parseCommand(name string, args [][]byte) action.Command {
 		return action.VERSION()
 
 	case "SET":
+		return action.SET(args)
+
 	case "DEL":
 	}
 

@@ -4,20 +4,20 @@ import (
 	"github.com/pointc-io/ipdb/redcon"
 )
 
-func GET(args [][]byte) Command {
-	if len(args) != 2 {
+func SET(args [][]byte) Command {
+	if len(args) != 3 {
 		return &errCommand{result: redcon.AppendError(nil, "ERR wrong number of arguments")}
 	} else {
 		key := args[1]
-		return &getCmd{key: string(key)}
+		return &setCmd{key: string(key)}
 	}
 }
 
-type getCmd struct {
+type setCmd struct {
 	command
 	key string
 }
 
-func (c *getCmd) Invoke() []byte {
-	return redcon.AppendBulkString(nil, "Some Value")
+func (c *setCmd) Invoke() []byte {
+	return redcon.AppendOK(nil)
 }
