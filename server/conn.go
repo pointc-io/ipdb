@@ -14,15 +14,14 @@ type dbConn struct {
 	id       int
 	is       InputStream
 	addr     string
-	evloop      *evio.Server
+	evloop   *evio.Server
 	evaction evio.Action
-	done bool
+	done     bool
 
-	mu      sync.Mutex
-	b       []byte // Out buffer
-	outlog  [][]byte
-	backlog []action.Command
-	current action.Command
+	mu         sync.Mutex
+	out        []byte // Out buffer
+	backlog    []action.Command
+	dispatched action.Command
 }
 
 // Incoming REDIS protocol command
@@ -34,13 +33,12 @@ func (c *dbConn) incoming(name string, args [][]byte) (out []byte) {
 		cmd = action.ERR(0, "Command '"+name+"' not found")
 	}
 
-	if c.current == nil {
-		b := cmd.Invoke()
-		if len(b) > 0 {
-			out = append(out, b...)
-		} else {
-			c.current = cmd
-			Workers.Dispatch(cmd)
+	if c.dispatched == nil {
+		before := len(out)
+		out = cmd.Invoke(out)
+
+		if len(out) == before {
+			c.dispatch(cmd)
 		}
 	} else {
 		// Append onto backlog
@@ -48,6 +46,34 @@ func (c *dbConn) incoming(name string, args [][]byte) (out []byte) {
 	}
 
 	return
+}
+
+func (c *dbConn) dispatch(cmd action.Command) {
+	c.dispatched = cmd
+	Workers.Dispatch(c)
+}
+
+func (c *dbConn) Run() {
+	c.mu.Lock()
+	if c.dispatched == nil {
+		c.mu.Unlock()
+		return
+	}
+	c.mu.Unlock()
+
+	l := len(c.out)
+	// Run job.
+	c.out = c.dispatched.Background(c.out)
+
+	if len(c.out) == l {
+		c.out = action.ERR(0, "Command not implemented").Invoke(c.out)
+	}
+
+	c.mu.Lock()
+	c.dispatched = nil
+	c.mu.Unlock()
+
+	c.wake()
 }
 
 func (c *dbConn) close() {
@@ -67,21 +93,32 @@ func (c *dbConn) wake() {
 func (c *dbConn) woke() (out []byte, action evio.Action) {
 	// Set output buffer
 	c.mu.Lock()
-	out = c.b
+	if c.dispatched != nil {
+		c.mu.Unlock()
+		return
+	}
+	if len(out) == 0 {
+		out = c.out
+	} else {
+		out = append(out, c.out...)
+	}
+	// Clear connection's out buffer
+	c.out = nil
 	c.mu.Unlock()
 
 	// Empty backlog.
 loop:
-	for _, cmd := range c.backlog {
-		r := cmd.Invoke()
-		if len(r) == 0 {
+	for i, cmd := range c.backlog {
+		before := len(out)
+		out = cmd.Invoke(out)
+		if len(out) == before {
+			c.backlog = c.backlog[i+1:]
 			break loop
+		} else {
+			c.dispatched = cmd
+			Workers.Dispatch(c)
 		}
-		out = append(out, r...)
 	}
-
-	// Clear connection buffer.
-	c.b = nil
 	return
 }
 

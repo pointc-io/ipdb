@@ -21,7 +21,7 @@ const (
 )
 
 type WorkerJob interface {
-	Run(ctx context.Context)
+	Run()
 }
 
 type _noopJob struct {
@@ -288,7 +288,7 @@ func (w *Worker) run(wg *sync.WaitGroup) {
 			}
 
 			// Run job under pool Context
-			j.Run(w.pool.ctx)
+			j.Run()
 
 			// Switch back to Idle
 			atomic.SwapInt32(&w.state, Idle)

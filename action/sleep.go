@@ -4,7 +4,6 @@ import (
 	"github.com/pointc-io/ipdb/redcon"
 	"strconv"
 	"time"
-	"context"
 )
 
 func SLEEP(args [][]byte) Command {
@@ -28,7 +27,7 @@ type sleepCmd struct {
 	seconds int
 }
 
-func (c *sleepCmd) Run(ctx context.Context) {
+func (c *sleepCmd) Background(out []byte) []byte {
 	time.Sleep(time.Duration(c.seconds) * time.Second)
-	redcon.AppendOK(nil)
+	return redcon.AppendOK(out)
 }

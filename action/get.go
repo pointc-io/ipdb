@@ -18,6 +18,6 @@ type getCmd struct {
 	key string
 }
 
-func (c *getCmd) Invoke() []byte {
-	return redcon.AppendBulkString(nil, "Some Value")
+func (c *getCmd) Invoke(out []byte) []byte {
+	return redcon.AppendBulkString(out, "1")
 }

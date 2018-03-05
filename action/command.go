@@ -1,30 +1,28 @@
 package action
 
 import (
-	"github.com/pointc-io/ipdb/worker"
 	"github.com/pointc-io/ipdb/redcon"
-	"context"
 )
 
 var NeedsDispatch = []byte{}
 
 type Command interface {
-	worker.WorkerJob
-
 	// Invoke happens on the EventLoop
-	Invoke() []byte
+	Invoke(out []byte) []byte
+
+	Background(out []byte) []byte
 }
 
 type command struct {
 	Command
 }
 
-func (c *command) Invoke() []byte {
-	return redcon.AppendError(nil, "ERR not implemented")
+func (c *command) Invoke(out []byte) []byte {
+	return redcon.AppendError(out, "ERR not implemented")
 }
 
-func (c *command) Run(ctx context.Context) {
-	redcon.AppendError(nil, "ERR not implemented")
+func (c *command) Background(out []byte) []byte {
+	return redcon.AppendError(out, "ERR not implemented")
 }
 
 func ERR(code int, message string) *errCommand {
@@ -39,11 +37,12 @@ func RAW(b []byte) Command {
 
 type rawCommand []byte
 
-func (c rawCommand) Run(ctx context.Context) {
+func (c rawCommand) Background(out []byte) []byte {
+	return append(out, c...)
 }
 
-func (c rawCommand) Invoke() []byte {
-	return c
+func (c rawCommand) Invoke(out []byte) []byte {
+	return append(out, c...)
 }
 
 type errCommand struct {
@@ -51,14 +50,14 @@ type errCommand struct {
 	result []byte
 }
 
-func (c *errCommand) Invoke() []byte {
-	return c.result
+func (c *errCommand) Invoke(out []byte) []byte {
+	return append(out, c.result...)
 }
 
 type bgCommand struct {
 	Command
 }
 
-func (c *bgCommand) Invoke() []byte {
-	return NeedsDispatch
+func (c *bgCommand) Invoke(out []byte) []byte {
+	return out
 }

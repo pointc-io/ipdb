@@ -8,16 +8,16 @@ func SET(args [][]byte) Command {
 	if len(args) != 3 {
 		return &errCommand{result: redcon.AppendError(nil, "ERR wrong number of arguments")}
 	} else {
-		key := args[1]
-		return &setCmd{key: string(key)}
+		return &setCmd{key: string(args[1]), value: string(args[2])}
 	}
 }
 
 type setCmd struct {
 	command
-	key string
+	key   string
+	value string
 }
 
-func (c *setCmd) Invoke() []byte {
-	return redcon.AppendOK(nil)
+func (c *setCmd) Invoke(out []byte) []byte {
+	return redcon.AppendOK(out)
 }
