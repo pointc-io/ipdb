@@ -70,6 +70,8 @@ type Server struct {
 	// following this call. Look for socket errors from the Closed event.
 	// Not available for UDP connections.
 	Dial func(addr string, timeout time.Duration) (id int)
+
+	Shutdown func()
 }
 
 // Events represents the server events for the Serve call.

@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	//DialPool *pool.Pool
+//DialPool *pool.Pool
 )
 
 func (ln *listener) close() {
@@ -148,6 +148,8 @@ func serve(events Events, lns []*listener) error {
 	}
 	var mu sync.Mutex
 	var done bool
+	var isshutdown = false
+
 	lock := func() { mu.Lock() }
 	unlock := func() { mu.Unlock() }
 	fdconn := make(map[int]*unixConn)
@@ -155,6 +157,23 @@ func serve(events Events, lns []*listener) error {
 	udpconn := make(map[syscall.SockaddrInet6]*unixConn)
 	timeoutqueue := internal.NewTimeoutQueue()
 	var id int
+
+	shutdown := func() {
+		lock()
+		isshutdown = true
+		unlock()
+
+		for _, ln := range lns {
+			ln.close()
+
+			//if err := internal.AddWrite(p, ln.fd, nil, nil); err != nil {
+			//	fmt.Println(err)
+			//}
+		}
+
+	}
+	_ = shutdown
+
 	dial := func(addr string, timeout time.Duration) int {
 		lock()
 		if done {
@@ -258,7 +277,7 @@ func serve(events Events, lns []*listener) error {
 		}
 		return ok
 	}
-	ctx := Server{Wake: wake, Dial: dial}
+	ctx := Server{Wake: wake, Dial: dial, Shutdown: shutdown}
 	ctx.Addrs = make([]net.Addr, len(lns))
 	for i, ln := range lns {
 		ctx.Addrs[i] = ln.lnaddr
@@ -341,6 +360,9 @@ func serve(events Events, lns []*listener) error {
 		if err != nil && err != syscall.EINTR {
 			return err
 		}
+		if isshutdown {
+			return nil
+		}
 		remain := nextTicker.Sub(time.Now())
 		if remain < 0 {
 			var tickerDelay time.Duration
@@ -411,6 +433,9 @@ func serve(events Events, lns []*listener) error {
 			var fd = internal.GetFD(evs, i)
 			for lnidx, ln = range lns {
 				if fd == ln.fd {
+					if isshutdown {
+						goto fail
+					}
 					if ln.pconn != nil {
 						goto udpread
 					}
@@ -438,8 +463,8 @@ func serve(events Events, lns []*listener) error {
 			id++
 			c = &unixConn{id: id, fd: nfd,
 				opening: true,
-				lnidx:   lnidx,
-				raddr:   sockaddrToAddr(rsa),
+				lnidx: lnidx,
+				raddr: sockaddrToAddr(rsa),
 			}
 			// we have a remote address but the local address yet.
 			if err = internal.AddWrite(p, c.fd, &c.readon, &c.writeon); err != nil {
@@ -528,12 +553,13 @@ func serve(events Events, lns []*listener) error {
 			}
 			if c.action == None {
 				if events.Data != nil {
-					if c.opts.ReuseInputBuffer {
-						in = packet[:n]
-					} else {
-						in = packet[:n]
-						//in = append([]byte{}, packet[:n]...)
-					}
+					in = packet[:n]
+					//if c.opts.ReuseInputBuffer {
+					//	in = packet[:n]
+					//} else {
+					//	in = packet[:n]
+					//	//in = append([]byte{}, packet[:n]...)
+					//}
 					unlock()
 					out, c.action = events.Data(c.id, in)
 					lock()
@@ -590,12 +616,13 @@ func serve(events Events, lns []*listener) error {
 					c.err = err
 					goto close
 				}
-				if c.opts.ReuseInputBuffer {
-					in = packet[:n]
-				} else {
-					in = packet[:n]
-					//in = append([]byte{}, packet[:n]...)
-				}
+				in = packet[:n]
+				//if c.opts.ReuseInputBuffer {
+				//	in = packet[:n]
+				//} else {
+				//	in = packet[:n]
+				//	//in = append([]byte{}, packet[:n]...)
+				//}
 			}
 			if events.Data != nil {
 				unlock()
@@ -645,7 +672,8 @@ func serve(events Events, lns []*listener) error {
 				c.outpos += n
 				if len(c.outbuf)-c.outpos == 0 {
 					c.outpos = 0
-					c.outbuf = c.outbuf[:0]
+					//c.outbuf = c.outbuf[:0]
+					c.outbuf = nil
 				}
 			}
 			if c.action == Shutdown {

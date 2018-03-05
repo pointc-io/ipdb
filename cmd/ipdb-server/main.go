@@ -124,11 +124,11 @@ func main() {
 
 // Viper init
 func config() {
-	viper.SetConfigName("config")                       // name of config file (without extension)
+	viper.SetConfigName("config")                            // name of config file (without extension)
 	viper.AddConfigPath(fmt.Sprintf("/etc/%s/", ipdb.Name))  // path to look for the config file in
 	viper.AddConfigPath(fmt.Sprintf("$HOME/.%s", ipdb.Name)) // call multiple times to add many search paths
-	viper.AddConfigPath(".")                            // optionally look for config in the working directory
-	err := viper.ReadInConfig()                         // Find and read the config file
+	viper.AddConfigPath(".")                                 // optionally look for config in the working directory
+	err := viper.ReadInConfig()                              // Find and read the config file
 	if err != nil { // incoming errors reading the config file
 		//panic(fmt.Errorf("Fatal error config file: %s \n", err))
 	}
@@ -150,8 +150,12 @@ func start(cmd *cobra.Command, args []string) {
 
 	// Create, Start and Wait for Daemon to exit
 	app := &Daemon{}
-	app.BaseService = *service.NewBaseService(logger, "AppService", app)
-	app.Start()
+	app.BaseService = *service.NewBaseService(logger, "Daemon", app)
+	err := app.Start()
+	if err != nil {
+		logger.Error().Err(err)
+		return
+	}
 	app.Wait()
 }
 
@@ -224,13 +228,13 @@ func DaemonLogger() zerolog.Logger {
 type Daemon struct {
 	service.BaseService
 
-	server *server.Server
+	server *server.RServer
 }
 
 func (d *Daemon) OnStart() error {
+	// Handle os signals.
 	c := make(chan os.Signal, 1)
 	slogger := logger.With().Str("Logger", "os.signal").Logger()
-
 	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		s := <-c
@@ -254,10 +258,18 @@ func (d *Daemon) OnStart() error {
 		}
 	}()
 
-	d.server = server.NewServer(logger, "", int(port))
-	d.server.Start()
+	// Start Server.
+	d.server = server.NewServer("", int(port))
+	err := d.server.Start()
 
-	return nil
+	return err
+}
+
+func (d *Daemon) OnStop() {
+	err := d.server.Stop()
+	if err != nil {
+		d.Logger.Error().Err(err)
+	}
 }
 
 //func (c *Daemon) watchOutOfMemory() {

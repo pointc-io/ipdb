@@ -364,6 +364,8 @@ func servenet(events Events, lns []*listener) error {
 			}
 		}
 	}
+	ctx.Shutdown = func() { shutdown(nil) }
+
 	ctx.Addrs = make([]net.Addr, len(lns))
 	for i, ln := range lns {
 		ctx.Addrs[i] = ln.lnaddr

@@ -9,23 +9,28 @@ import (
 )
 
 var Workers = worker.DefaultPool
+var MaxConnBacklog = 2048
 
 type dbConn struct {
 	id       int
-	is       InputStream
 	addr     string
 	evloop   *evio.Server
 	evaction evio.Action
 	done     bool
 
-	mu         sync.Mutex
-	out        []byte // Out buffer
-	backlog    []action.Command
-	dispatched action.Command
+	mu   sync.Mutex
+	in   []byte
+	out  []byte // Out buffer
+	outb []byte
+
+	backlog        []action.Command
+	backlogOverage int
+	dispatched     action.Command
 }
 
 // Incoming REDIS protocol command
-func (c *dbConn) incoming(name string, args [][]byte) (out []byte) {
+func (c *dbConn) incoming(b []byte, name string, args [][]byte) (out []byte) {
+	out = b
 	// Parse Command
 	cmd := c.parseCommand(name, args)
 
@@ -40,6 +45,8 @@ func (c *dbConn) incoming(name string, args [][]byte) (out []byte) {
 		if len(out) == before {
 			c.dispatch(cmd)
 		}
+
+		c.out = out
 	} else {
 		// Append onto backlog
 		c.backlog = append(c.backlog, cmd)
@@ -48,12 +55,29 @@ func (c *dbConn) incoming(name string, args [][]byte) (out []byte) {
 	return
 }
 
+func (c *dbConn) flush(amount, remaining int) {
+	if c.outb == nil {
+		return
+	}
+	l := len(c.outb)
+	if amount == l {
+		BufferPool.Put(c.outb)
+		c.outb = nil
+	} else if amount > l {
+		BufferPool.Put(c.outb)
+		c.outb = nil
+	} else {
+		c.outb = c.outb[amount:]
+	}
+}
+
 func (c *dbConn) dispatch(cmd action.Command) {
 	c.dispatched = cmd
 	Workers.Dispatch(c)
 }
 
 func (c *dbConn) Run() {
+	// Was the job already canceled?
 	c.mu.Lock()
 	if c.dispatched == nil {
 		c.mu.Unlock()
@@ -73,23 +97,27 @@ func (c *dbConn) Run() {
 	c.dispatched = nil
 	c.mu.Unlock()
 
+	// Notify event loop of our write.
 	c.wake()
 }
 
+// Inform the event loop to close this connection.
 func (c *dbConn) close() {
 	c.evaction = evio.Close
 	c.wake()
 }
 
+// Called when the event loop has closed this connection.
 func (c *dbConn) closed() {
 	c.done = true
 }
 
+// Asks the event loop to schedule a write event for this connection.
 func (c *dbConn) wake() {
 	c.evloop.Wake(c.id)
 }
 
-//
+// Invoked on the event loop thread.
 func (c *dbConn) woke() (out []byte, action evio.Action) {
 	// Set output buffer
 	c.mu.Lock()
@@ -107,43 +135,61 @@ func (c *dbConn) woke() (out []byte, action evio.Action) {
 	c.mu.Unlock()
 
 	// Empty backlog.
-loop:
 	for i, cmd := range c.backlog {
 		before := len(out)
 		out = cmd.Invoke(out)
+
+		// Does it need to be dispatched?
 		if len(out) == before {
-			c.backlog = c.backlog[i+1:]
-			break loop
-		} else {
+			// Update backlog.
+			if i == len(c.backlog)-1 {
+				c.backlog = nil
+			} else {
+				c.backlog = c.backlog[i+1:]
+			}
+			// Command needs to be dispatched.
 			c.dispatched = cmd
 			Workers.Dispatch(c)
+			return
+		} else {
+			// Update backlog.
+			if i == len(c.backlog)-1 {
+				c.backlog = nil
+			} else {
+				c.backlog = c.backlog[i+1:]
+			}
+			return
 		}
 	}
+
+	// Backlog has been fully drained.
+	c.backlog = nil
 	return
 }
 
-// InputStream is a helper type for managing input streams inside the
-// Data event.
-type InputStream struct{ b []byte }
-
 // Begin accepts a new packet and returns a working sequence of
 // unprocessed bytes.
-func (is *InputStream) Begin(packet []byte) (data []byte) {
+func (c *dbConn) begin(packet []byte) (data []byte) {
 	data = packet
-	if len(is.b) > 0 {
-		is.b = append(is.b, data...)
-		data = is.b
+	if len(c.in) > 0 {
+		c.in = append(c.in, data...)
+		data = c.in
 	}
 	return data
 }
 
 // End shift the stream to match the unprocessed data.
-func (is *InputStream) End(data []byte) {
+func (c *dbConn) end(data []byte) {
 	if len(data) > 0 {
-		if len(data) != len(is.b) {
-			is.b = append(is.b[:0], data...)
+		if len(data) != len(c.in) {
+			c.in = append(c.in[:0], data...)
 		}
-	} else if len(is.b) > 0 {
-		is.b = is.b[:0]
+	} else if len(c.in) > 0 {
+		c.in = c.in[:0]
 	}
+
+	//if len(c.out) > 0 {
+	//	c.outb = c.out
+	//	c.out = nil
+	//}
 }

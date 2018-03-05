@@ -15,7 +15,9 @@ import (
 	"github.com/pointc-io/ipdb/service"
 
 	"github.com/rcrowley/go-metrics"
-	"github.com/rs/zerolog"
+	"net"
+	"runtime"
+	"github.com/pointc-io/ipdb"
 )
 
 // Buffers
@@ -23,9 +25,9 @@ var ReaderPool = pbufio.DefaultReaderPool
 var WriterPool = pbufio.DefaultWriterPool
 var BufferPool = pbytes.DefaultPool
 // Server
-var Svr *Server
+var Svr *RServer
 
-type Server struct {
+type RServer struct {
 	service.BaseService
 
 	// static values
@@ -36,7 +38,7 @@ type Server struct {
 	started   time.Time
 	maxMemory uint64
 
-	logger zerolog.Logger
+	listener net.Listener
 
 	statsTotalConns        metrics.Counter // counter for total connections
 	statsTotalCommands     metrics.Counter // counter for total commands
@@ -46,39 +48,52 @@ type Server struct {
 	outOfMemory            abool
 
 	evloop *evio.Server
+	action evio.Action
 	conns  map[int]*dbConn
 	wg     *sync.WaitGroup
 
 	mu sync.RWMutex
 }
 
-func NewServer(logger zerolog.Logger, host string, port int) *Server {
-	Svr = &Server{
-		host:   host,
-		port:   port,
-		logger: logger,
-		wg:     &sync.WaitGroup{},
+func NewServer(host string, port int) *RServer {
+	Svr = &RServer{
+		host: host,
+		port: port,
+		wg:   &sync.WaitGroup{},
 
 		conns: make(map[int]*dbConn),
 	}
 
-	Svr.BaseService = *service.NewBaseService(logger, "Server", Svr)
+	Svr.BaseService = *service.NewBaseService(ipdb.Logger, "Server", Svr)
 	return Svr
 }
 
-func (s *Server) OnStart() error {
+func (s *RServer) OnStart() error {
+	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", s.port))
+	if err != nil {
+		return err
+	}
+
+	s.listener, err = net.ListenTCP("tcp", addr)
+	if err != nil {
+		return err
+	}
+
 	s.wg.Add(1)
 	go s.serve()
 	return nil
 }
 
-func (s *Server) OnStop() {
-	s.evloop.Wake(-1)
+func (s *RServer) OnStop() {
+	s.action = evio.Shutdown
+	s.evloop.Shutdown()
 	s.wg.Wait()
 }
 
-func (s *Server) serve() {
+func (s *RServer) serve() {
 	defer s.wg.Done()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	conns := Svr.conns
 
@@ -88,7 +103,7 @@ func (s *Server) serve() {
 	events.Serving = func(loop evio.Server) (action evio.Action) {
 		evloop = loop
 		Svr.evloop = &loop
-		s.logger.Info().Msgf("ipdb server started on port %d", s.port)
+		s.Logger.Info().Msgf("ipdb server started on port %d", s.port)
 		return
 	}
 	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
@@ -108,6 +123,9 @@ func (s *Server) serve() {
 		//}
 		// Tick every second.
 		delay = time.Second
+		if s.action == evio.Shutdown {
+			action = evio.Shutdown
+		}
 		return
 	}
 	events.Closed = func(id int, err error) (action evio.Action) {
@@ -122,10 +140,23 @@ func (s *Server) serve() {
 
 		return
 	}
+	events.Postwrite = func(id int, amount, remaining int) (action evio.Action) {
+		//c, ok := conns[id]
+		//if !ok {
+		//	return
+		//}
+		//c.flush(amount, remaining)
+		//if remaining == 0 {
+		//	c.flush()
+		//	//s.Logger.Debug().Msgf("Flushed out buffer")
+		//}
+		return
+	}
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 		c, ok := conns[id]
 		if !ok {
 			if id == -1 {
+				s.Logger.Error().Msg("Received shutdown command.")
 				action = evio.Shutdown
 			} else {
 				action = evio.Close
@@ -148,11 +179,15 @@ func (s *Server) serve() {
 		// If we get partial commands then we need to copy to
 		// an allocated buffer at the connection level.
 		// Zero copy if possible strategy.
-		data := c.is.Begin(in)
+		data := c.begin(in)
 
 		var complete bool
 		var err error
 		var args [][]byte
+
+		//if cap(c.out) == 0 {
+		//	c.out = BufferPool.GetCap(8192)
+		//}
 		for action == evio.None {
 			complete, args, _, data, err = redcon.ReadNextCommand(data, args[:0])
 
@@ -170,29 +205,27 @@ func (s *Server) serve() {
 
 			if len(args) > 0 {
 				// First argument is the command string.
-				r := c.incoming(strings.ToUpper(string(args[0])), args)
-				if len(r) > 0 {
-					out = append(out, r...)
-				}
+				out = c.incoming(out, strings.ToUpper(string(args[0])), args)
 			}
 		}
 
 		// Copy partial command data if any.
-		c.is.End(data)
+		c.end(data)
 		return
 	}
 
 	//go Svr.watchOutOfMemory()
 
-	var ssuf string
+	//var ssuf string
 	//if stdlib {
 	//	ssuf = "-net"
 	//}
-	addrs := []string{fmt.Sprintf("tcp"+ssuf+"://:%d", s.port)}
+	//addrs := []string{fmt.Sprintf("tcp"+ssuf+"://:%d", s.port)}
 	//if unixsocket != "" {
 	//	addrs = append(addrs, fmt.Sprintf("unix"+ssuf+"://%s", unixsocket))
 	//}
-	err := evio.Serve(events, addrs...)
+	err := evio.ServeListener(events, false, s.listener)
+	//err := evio.Serve(events, addrs...)
 	if err != nil {
 		log.Fatal(err)
 	}

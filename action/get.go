@@ -1,7 +1,7 @@
 package action
 
 import (
-	"github.com/pointc-io/ipdb/redcon"
+"github.com/pointc-io/ipdb/redcon"
 )
 
 func GET(args [][]byte) Command {
