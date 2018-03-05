@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/pointc-io/essentials/pid"
+	"github.com/pointc-io/ipdb/pid"
 	"github.com/pointc-io/ipdb/service"
 
 	//_ "go.uber.org/automaxprocs"
