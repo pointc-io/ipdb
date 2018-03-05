@@ -1,10 +1,10 @@
 package ipdb
 
 import (
-	"github.com/spf13/cobra"
 	"github.com/rs/zerolog"
 )
 
-var AppName = "appname"
-var AppLogger zerolog.Logger
-var AppCmd *cobra.Command
+var Name = "ipdb-server"
+var Version = "0.1.0-1" // SemVer
+var GIT = ""
+var Logger zerolog.Logger

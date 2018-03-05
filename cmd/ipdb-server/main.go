@@ -20,9 +20,6 @@ import (
 	"github.com/pointc-io/ipdb/server"
 )
 
-var name = "exampled"
-var version = "1.0.0-1293" // SemVer
-var git = ""
 var logger zerolog.Logger
 var port uint16
 var dev bool
@@ -33,8 +30,7 @@ func main() {
 
 	// Configure as CLI Logger to start
 	logger = CLILogger()
-	ipdb.AppLogger = logger
-	ipdb.AppName = name
+	ipdb.Logger = logger
 
 	var cmdStart = &cobra.Command{
 		Use:   "start",
@@ -60,11 +56,11 @@ func main() {
 
 	var cmdStatus = &cobra.Command{
 		Use:   "status",
-		Short: "Prints the current status of " + name,
+		Short: "Prints the current status of " + ipdb.Name,
 		Long:  ``,
 		Args:  cobra.MinimumNArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			pidfile := single.New(name)
+			pidfile := single.New(ipdb.Name)
 			l := pidfile.Lock()
 			if l.Success {
 				pidfile.Unlock()
@@ -95,7 +91,7 @@ func main() {
 	)
 
 	var cmdRoot = &cobra.Command{
-		Use: name,
+		Use: ipdb.Name,
 		// Default to start as daemon
 		Run: start,
 	}
@@ -116,9 +112,9 @@ func main() {
 	cmdRoot.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print the version number",
-		Long:  `All software has versions. This is ` + name + `'s`,
+		Long:  `All software has versions. This is ` + ipdb.Name + `'s`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(fmt.Sprintf("%s %s", name, version))
+			fmt.Println(fmt.Sprintf("%s %s", ipdb.Name, ipdb.Version))
 		},
 	})
 	cmdRoot.AddCommand(cmdStart, cmdStop, cmdStatus)
@@ -129,8 +125,8 @@ func main() {
 // Viper init
 func config() {
 	viper.SetConfigName("config")                       // name of config file (without extension)
-	viper.AddConfigPath(fmt.Sprintf("/etc/%s/", name))  // path to look for the config file in
-	viper.AddConfigPath(fmt.Sprintf("$HOME/.%s", name)) // call multiple times to add many search paths
+	viper.AddConfigPath(fmt.Sprintf("/etc/%s/", ipdb.Name))  // path to look for the config file in
+	viper.AddConfigPath(fmt.Sprintf("$HOME/.%s", ipdb.Name)) // call multiple times to add many search paths
 	viper.AddConfigPath(".")                            // optionally look for config in the working directory
 	err := viper.ReadInConfig()                         // Find and read the config file
 	if err != nil { // incoming errors reading the config file
@@ -141,10 +137,10 @@ func config() {
 func start(cmd *cobra.Command, args []string) {
 	// Change logger to Daemon Logger
 	logger = DaemonLogger()
-	ipdb.AppLogger = logger
+	ipdb.Logger = logger
 
 	// Ensure only 1 instance through PID lock
-	pidfile := single.New(name)
+	pidfile := single.New(ipdb.Name)
 	lockResult := pidfile.Lock()
 	if !lockResult.Success {
 		logger.Error().Msgf("Process already running PID:%d Host:localhost:%d", lockResult.Pid, lockResult.Port)
@@ -161,7 +157,7 @@ func start(cmd *cobra.Command, args []string) {
 
 func stop(force bool) {
 	// Ensure only 1 instance.
-	pidfile := single.New(name)
+	pidfile := single.New(ipdb.Name)
 	l := pidfile.Lock()
 	if l.Success {
 		pidfile.Unlock()

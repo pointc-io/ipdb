@@ -33,6 +33,19 @@ func ERR(code int, message string) *errCommand {
 	}
 }
 
+func RAW(b []byte) Command {
+	return rawCommand(b)
+}
+
+type rawCommand []byte
+
+func (c rawCommand) Run(ctx context.Context) {
+}
+
+func (c rawCommand) Invoke() []byte {
+	return c
+}
+
 type errCommand struct {
 	Command
 	result []byte

@@ -10,6 +10,9 @@ func (c *dbConn) parseCommand(name string, args [][]byte) action.Command {
 	case "GET":
 		return action.GET(args)
 
+	case "VERSION":
+		return action.VERSION()
+
 	case "SET":
 	case "DEL":
 	}
