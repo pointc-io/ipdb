@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	DefaultPool = NewWorkerPool(context.Background(), 0, 100000)
+	DefaultPool = NewWorkerPool(context.Background(), 0, 0)
 )
 
 const (
@@ -120,6 +120,8 @@ func (w *WorkerPool) PrintStats() {
 }
 
 func (w *WorkerPool) Register(registry metrics.Registry) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	name := "WorkerPool." + w.name
 	registry.Register(name+".supply", w.supply)
 	registry.Register(name+".maxSupply", w.maxSupply)

@@ -88,6 +88,34 @@ type unixConn struct {
 	opening  bool
 }
 
+func (c *unixConn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+// SetReadDeadline sets the deadline for future Read calls
+// and any currently-blocked Read call.
+// A zero value for t means Read will not time out.
+func (c *unixConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+// SetWriteDeadline sets the deadline for future Write calls
+// and any currently-blocked Write call.
+// Even if write times out, it may return n > 0, indicating that
+// some of the data was successfully written.
+// A zero value for t means Write will not time out.
+func (c *unixConn) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *unixConn) LocalAddr() net.Addr {
+	return c.laddr
+}
+
+func (c *unixConn) RemoteAddr() net.Addr {
+	return c.raddr
+}
+
 func (c *unixConn) Timeout() time.Time {
 	return c.timeout
 }

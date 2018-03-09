@@ -5,7 +5,6 @@
 package evio
 
 import (
-	"io"
 	"net"
 	"os"
 	"strings"
@@ -97,7 +96,7 @@ type Events struct {
 	// The conn parameter is a ReadWriteCloser that represents the
 	// underlying socket connection. It can be freely used in goroutines
 	// and should be closed when it's no longer needed.
-	Detached func(id int, rwc io.ReadWriteCloser) (action Action)
+	Detached func(id int, conn net.Conn) (action Action)
 	// Data fires when a connection sends the server data.
 	// The in parameter is the incoming data.
 	// Use the out return value to write data to the connection.

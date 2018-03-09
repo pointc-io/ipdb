@@ -23,9 +23,38 @@ type netConn struct {
 	err      error
 }
 
+func (c *netConn) SetDeadline(t time.Time) error {
+	return c.conn.SetDeadline(t)
+}
+
+// SetReadDeadline sets the deadline for future Read calls
+// and any currently-blocked Read call.
+// A zero value for t means Read will not time out.
+func (c *netConn) SetReadDeadline(t time.Time) error {
+	return c.conn.SetReadDeadline(t)
+}
+
+// SetWriteDeadline sets the deadline for future Write calls
+// and any currently-blocked Write call.
+// Even if write times out, it may return n > 0, indicating that
+// some of the data was successfully written.
+// A zero value for t means Write will not time out.
+func (c *netConn) SetWriteDeadline(t time.Time) error {
+	return c.conn.SetWriteDeadline(t)
+}
+
+func (c *netConn) LocalAddr() net.Addr {
+	return c.conn.LocalAddr()
+}
+
+func (c *netConn) RemoteAddr() net.Addr {
+	return c.conn.RemoteAddr()
+}
+
 func (c *netConn) Read(p []byte) (n int, err error) {
 	return c.conn.Read(p)
 }
+
 func (c *netConn) Write(p []byte) (n int, err error) {
 	if c.detached {
 		if len(c.outbuf) > 0 {
@@ -58,6 +87,7 @@ func (c *netConn) Write(p []byte) (n int, err error) {
 	}
 	return c.conn.Write(p)
 }
+
 func (c *netConn) Close() error {
 	return c.conn.Close()
 }

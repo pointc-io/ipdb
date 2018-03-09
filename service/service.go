@@ -98,7 +98,7 @@ type BaseService struct {
 
 func NewBaseService(logger zerolog.Logger, name string, impl Service) *BaseService {
 	return &BaseService{
-		Logger: logger.With().Str("Logger", name).Logger(),
+		Logger: logger.With().Str("logger", name).Logger(),
 		name:   name,
 		Quit:   make(chan struct{}),
 		impl:   impl,
@@ -113,10 +113,10 @@ func (bs *BaseService) SetLogger(l zerolog.Logger) {
 func (bs *BaseService) Start() error {
 	if atomic.CompareAndSwapUint32(&bs.started, 0, 1) {
 		if atomic.LoadUint32(&bs.stopped) == 1 {
-			bs.Logger.Error().Msgf("Not starting %v -- already stopped", bs.name)
+			bs.Logger.Error().Msgf("not starting -- already stopped")
 			return ErrAlreadyStopped
 		} else {
-			bs.Logger.Info().Msg("Starting...")
+			bs.Logger.Debug().Msg("starting")
 		}
 		started := time.Now()
 		bs.startedTime = started
@@ -126,10 +126,10 @@ func (bs *BaseService) Start() error {
 			atomic.StoreUint32(&bs.started, 0)
 			return err
 		}
-		bs.Logger.Info().Dur("Started", time.Now().Sub(started)).Msg("")
+		bs.Logger.Debug().Dur("start", time.Now().Sub(started)).Msg("")
 		return nil
 	} else {
-		bs.Logger.Debug().Msgf("Not starting %v -- already started", bs.name)
+		bs.Logger.Debug().Msg("not starting -- already started")
 		return ErrAlreadyStarted
 	}
 }
@@ -142,17 +142,17 @@ func (bs *BaseService) OnStart() error { return nil }
 // Implements Service
 func (bs *BaseService) Stop() error {
 	if atomic.CompareAndSwapUint32(&bs.stopped, 0, 1) {
-		bs.Logger.Info().Msg("Stopping...")
+		bs.Logger.Debug().Msg("stopping")
 		started := time.Now()
 		bs.impl.OnStop()
 		close(bs.Quit)
-		bs.Logger.Info().
-			Dur("StopDuration", time.Now().Sub(started)).
-			Dur("Lifespan", time.Now().Sub(bs.startedTime)).
-			Msg("Stopped")
+		bs.Logger.Debug().
+			Dur("stop", time.Now().Sub(started)).
+			Dur("lifespan", time.Now().Sub(bs.startedTime)).
+			Msg("stopped")
 		return nil
 	} else {
-		bs.Logger.Debug().Msgf("Stopping %v (ignoring: already stopped)", bs.name)
+		bs.Logger.Debug().Msg("stopping (ignoring: already stopped)")
 		return ErrAlreadyStopped
 	}
 }
@@ -165,7 +165,7 @@ func (bs *BaseService) OnStop() {}
 // Implements Service
 func (bs *BaseService) Reset() error {
 	if !atomic.CompareAndSwapUint32(&bs.stopped, 1, 0) {
-		bs.Logger.Debug().Msgf("Can't reset %v. Not stopped", bs.name)
+		bs.Logger.Debug().Msg("reset failed. not stopped")
 		return fmt.Errorf("can't reset running %s", bs.name)
 	}
 
@@ -178,7 +178,7 @@ func (bs *BaseService) Reset() error {
 
 // Implements Service
 func (bs *BaseService) OnReset() error {
-	bs.Logger.Panic().Msg("The service cannot be reset")
+	bs.Logger.Panic().Msg("service cannot be reset")
 	return nil
 }
 

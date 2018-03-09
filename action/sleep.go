@@ -1,19 +1,21 @@
 package action
 
 import (
-	"github.com/pointc-io/ipdb/redcon"
 	"strconv"
 	"time"
+
+	"github.com/pointc-io/ipdb/redcon"
+	"github.com/pointc-io/ipdb/redcon/ev"
 )
 
-func SLEEP(args [][]byte) Command {
+func SLEEP(args [][]byte) evred.Command {
 	// Validate.
 	if len(args) != 2 {
-		return ERR(0, "ERR wrong number of arguments for 'SLEEP' command")
+		return evred.ERR(0, "ERR wrong number of arguments for 'SLEEP' command")
 	} else {
 		seconds, err := strconv.Atoi(string(args[1]))
 		if err != nil {
-			return ERR(0, "ERR invalid seconds")
+			return evred.ERR(0, "ERR invalid seconds")
 		} else {
 			return &sleepCmd{
 				seconds: seconds,
@@ -23,7 +25,7 @@ func SLEEP(args [][]byte) Command {
 }
 
 type sleepCmd struct {
-	bgCommand
+	evred.BgCmd
 	seconds int
 }
 

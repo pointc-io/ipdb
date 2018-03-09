@@ -315,6 +315,20 @@ func serve(s *Server, ln net.Listener) error {
 	}
 }
 
+func NewConn(cn net.Conn) Conn {
+	c := &conn{
+		conn: cn,
+		addr: cn.RemoteAddr().String(),
+		wr:   NewWriter(cn),
+		rd:   NewReader(cn),
+	}
+	return c
+}
+
+func NewDetachedConn(cn net.Conn) DetachedConn {
+	return NewConn(cn).Detach()
+}
+
 // handle manages the server connection.
 func handle(s *Server, c *conn) {
 	var err error
@@ -742,7 +756,7 @@ func (rd *Reader) readCommands(leftover *int) ([]Command, error) {
 					if b[i-1] != '\r' {
 						return nil, errInvalidMultiBulkLength
 					}
-					count, ok := parseInt(b[1 : i-1])
+					count, ok := parseInt(b[1: i-1])
 					if !ok || count <= 0 {
 						return nil, errInvalidMultiBulkLength
 					}
@@ -761,7 +775,7 @@ func (rd *Reader) readCommands(leftover *int) ([]Command, error) {
 									if b[i-1] != '\r' {
 										return nil, errInvalidBulkLength
 									}
-									size, ok := parseInt(b[si+1 : i-1])
+									size, ok := parseInt(b[si+1: i-1])
 									if !ok || size < 0 {
 										return nil, errInvalidBulkLength
 									}

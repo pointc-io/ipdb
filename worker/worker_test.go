@@ -10,7 +10,7 @@ type workerJob struct {
 	wg *sync.WaitGroup
 }
 
-func (w *workerJob) Run(ctx context.Context) {
+func (w *workerJob) Run() {
 	//fmt.Println("Ran")
 	//time.Sleep(time.Second)
 	w.wg.Done()

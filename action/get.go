@@ -1,12 +1,13 @@
 package action
 
 import (
-"github.com/pointc-io/ipdb/redcon"
+	"github.com/pointc-io/ipdb/redcon"
+	"github.com/pointc-io/ipdb/redcon/ev"
 )
 
-func GET(args [][]byte) Command {
+func GET(args [][]byte) evred.Command {
 	if len(args) != 2 {
-		return &errCommand{result: redcon.AppendError(nil, "ERR wrong number of arguments")}
+		return &evred.ErrCmd{Result: redcon.AppendError(nil, "ERR wrong number of arguments")}
 	} else {
 		key := args[1]
 		return &getCmd{key: string(key)}
@@ -14,7 +15,7 @@ func GET(args [][]byte) Command {
 }
 
 type getCmd struct {
-	command
+	evred.Cmd
 	key string
 }
 
