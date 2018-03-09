@@ -943,6 +943,26 @@ func (db *DB) managed(writable bool, fn func(tx *Tx) error) (err error) {
 	return
 }
 
+func (db *DB) IsEmpty() bool {
+	empty := true
+	db.View(func(tx *Tx) error {
+		l, err := tx.Len()
+		if err != nil {
+			return err
+		}
+		if l > 0 {
+			empty = false
+		}
+
+		if len(db.idxs) > 0 {
+			empty = false
+		}
+
+		return nil
+	})
+	return empty
+}
+
 // View executes a function within a managed read-only transaction.
 // When a non-nil error is returned from the function that error will be return
 // to the caller of View().

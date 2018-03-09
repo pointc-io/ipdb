@@ -90,8 +90,9 @@ type shrinkable interface {
 }
 
 // New returns a new Shard.
-func NewShard(enableSingle bool, path, localID string) *Shard {
+func NewShard(id int, enableSingle bool, path, localID string) *Shard {
 	s := &Shard{
+		id:           id,
 		Path:         path,
 		localID:      localID,
 		enableSingle: enableSingle,
@@ -167,16 +168,27 @@ func (s *Shard) OnStart() error {
 	} else {
 		logpath = filepath.Join(s.Path, "raft.db")
 	}
+	var logname string
+	if s.id < 0 {
+		logname = "clusterdb"
+	} else {
+		logname = fmt.Sprintf("shard-%d-log", s.id)
+	}
 	// Create the log store and stable store.
 	s.store, err = raftfastlog.NewFastLogStore(
 		logpath,
 		raftfastlog.Medium,
-		ipdb.Logger.With().Str("logger", fmt.Sprintf("shard-%d-log", s.id)).Logger(),
+		ipdb.Logger.With().Str("logger", logname).Logger(),
 	)
 	if err != nil {
 		s.transport.Stop()
 		s.Logger.Error().Err(err).Msg("log store failed")
 		return fmt.Errorf("new log store: %s", err)
+	}
+
+	bootstrap := s.db.IsEmpty()
+	if bootstrap {
+		config.StartAsLeader = true
 	}
 
 	// Instantiate the Raft systems.
@@ -189,7 +201,7 @@ func (s *Shard) OnStart() error {
 		return fmt.Errorf("new raft: %s", err)
 	}
 
-	if s.enableSingle {
+	if bootstrap {
 		//config.StartAsLeader = true
 		configuration := raft.Configuration{
 			Servers: []raft.Server{

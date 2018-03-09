@@ -10,6 +10,8 @@ import (
 	"github.com/tidwall/redcon"
 	"strconv"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 type Server struct {
@@ -24,6 +26,7 @@ type Server struct {
 func NewServer(host string, path string, eventLoops int) *Server {
 	s := &Server{
 		host: host,
+		path: path,
 	}
 
 	s.server = evred.NewServer(host, eventLoops, s.onCommand)
@@ -56,12 +59,14 @@ func (s *Server) OnStop() {
 }
 
 func (s *Server) onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Action) {
-	name := string(args[0])
+	name := strings.ToUpper(string(args[0]))
 
 	switch name {
+	default:
+		out = redcon.AppendError(out, "ERR command " + name + " not found")
 	case "RAFTAPPEND":
 		if len(args) < 3 {
-			out = redcon.AppendError(out, "ERR 3 parameters expected")
+			out = redcon.AppendError(out, "ERR 2 parameters expected")
 		} else {
 			id, err := strconv.Atoi(string(args[1]))
 			if err != nil {
@@ -77,7 +82,7 @@ func (s *Server) onCommand(conn *evred.RedConn, args [][]byte) (out []byte, acti
 		}
 	case "RAFTVOTE":
 		if len(args) < 3 {
-			out = redcon.AppendError(out, "ERR 3 parameters expected")
+			out = redcon.AppendError(out, "ERR 2 parameters expected")
 		} else {
 			id, err := strconv.Atoi(string(args[1]))
 			if err != nil {
@@ -94,7 +99,7 @@ func (s *Server) onCommand(conn *evred.RedConn, args [][]byte) (out []byte, acti
 
 	case "RAFTINSTALL":
 		if len(args) < 3 {
-			out = redcon.AppendError(out, "ERR 3 parameters expected")
+			out = redcon.AppendError(out, "ERR 2 parameters expected")
 		} else {
 			id, err := strconv.Atoi(string(args[1]))
 			if err != nil {
@@ -111,6 +116,72 @@ func (s *Server) onCommand(conn *evred.RedConn, args [][]byte) (out []byte, acti
 		}
 
 	case "RAFTSHRINK":
+		if len(args) < 2 {
+			out = redcon.AppendError(out, "ERR 1 parameter expected")
+		} else {
+			id, err := strconv.Atoi(string(args[1]))
+			if err != nil {
+				out = redcon.AppendError(out, "ERR invalid int param for shard id")
+			} else {
+				shard := s.db.Shard(id)
+				if shard == nil {
+					out = redcon.AppendError(out, fmt.Sprintf("ERR shard %d not on node", id))
+				} else {
+					err := shard.ShrinkLog()
+					if err != nil {
+						out = redcon.AppendError(out, "ERR "+err.Error())
+					} else {
+						out = redcon.AppendOK(out)
+					}
+				}
+			}
+		}
+	case "RAFTSTATS":
+		if len(args) < 2 {
+			out = redcon.AppendError(out, "ERR 1 parameter expected")
+		} else {
+			id, err := strconv.Atoi(string(args[1]))
+			if err != nil {
+				out = redcon.AppendError(out, "ERR invalid int param for shard id")
+			} else {
+				shard := s.db.Shard(id)
+				if shard == nil {
+					out = redcon.AppendError(out, fmt.Sprintf("ERR shard %d not on node", id))
+				} else {
+					stats := shard.Stats()
+					keys := make([]string, 0, len(stats))
+					for key := range stats {
+						keys = append(keys, key)
+					}
+					sort.Strings(keys)
+					out = redcon.AppendArray(out, len(keys)*2)
+					for _, key := range keys {
+						out = redcon.AppendBulkString(out, key)
+						out = redcon.AppendBulkString(out, stats[key])
+					}
+				}
+			}
+		}
+	case "RAFTSTATE":
+		if len(args) < 2 {
+			out = redcon.AppendError(out, "ERR 1 parameter expected")
+		} else {
+			id, err := strconv.Atoi(string(args[1]))
+			if err != nil {
+				out = redcon.AppendError(out, "ERR invalid int param for shard id")
+			} else {
+				shard := s.db.Shard(id)
+				if shard == nil {
+					out = redcon.AppendError(out, fmt.Sprintf("ERR shard %d not on node", id))
+				} else {
+					state := shard.State()
+					out = redcon.AppendBulkString(out, state.String())
+				}
+			}
+		}
+
+	case "SHARDCOUNT":
+		out = redcon.AppendInt(out, 1)
 	}
 	return
 }

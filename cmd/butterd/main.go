@@ -30,6 +30,7 @@ var console bool
 var loops int
 var path string
 var loglevel int
+var singlemode bool
 
 func main() {
 	// Configure.
@@ -42,41 +43,7 @@ func main() {
 		Args:  cobra.MinimumNArgs(0),
 		Run:   start,
 	}
-	cmdStart.Flags().BoolVarP(
-		&console,
-		"console",
-		"c",
-		false,
-		"Format logger for the console",
-	)
-	cmdStart.Flags().Uint16VarP(
-		&port,
-		"port",
-		"p",
-		7390,
-		"Port to run the server on",
-	)
-	cmdStart.Flags().IntVarP(
-		&loops,
-		"eventloops",
-		"l",
-		runtime.NumCPU()/2,
-		"Number of EventLoops to start",
-	)
-	cmdStart.Flags().IntVarP(
-		&loglevel,
-		"loglevel",
-		"v",
-		int(zerolog.InfoLevel),
-		"Number of EventLoops to start",
-	)
-	cmdStart.Flags().StringVarP(
-		&path,
-		"dir",
-		"d",
-		defaultPath(),
-		"Root data directory",
-	)
+	configureStart(cmdStart)
 
 	var cmdStatus = &cobra.Command{
 		Use:   "status",
@@ -119,41 +86,7 @@ func main() {
 		// Default to start as daemon
 		Run: start,
 	}
-	cmdRoot.Flags().BoolVarP(
-		&console,
-		"console",
-		"c",
-		false,
-		"Format logger for the console",
-	)
-	cmdRoot.Flags().Uint16VarP(
-		&port,
-		"port",
-		"p",
-		7390,
-		"Port to run the server on",
-	)
-	cmdRoot.Flags().IntVarP(
-		&loops,
-		"eventloops",
-		"l",
-		runtime.NumCPU()/2,
-		"Number of EventLoops to start",
-	)
-	cmdRoot.Flags().IntVarP(
-		&loglevel,
-		"loglevel",
-		"v",
-		int(zerolog.InfoLevel),
-		"Log level",
-	)
-	cmdRoot.Flags().StringVarP(
-		&path,
-		"dir",
-		"d",
-		defaultPath(),
-		"Root data directory",
-	)
+	configureStart(cmdRoot)
 	cmdRoot.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print the version number",
@@ -164,7 +97,53 @@ func main() {
 	})
 	cmdRoot.AddCommand(cmdStart, cmdStop, cmdStatus)
 
+	// Let's get started!
 	cmdRoot.Execute()
+}
+
+func configureStart(cmd *cobra.Command) {
+	cmd.Flags().BoolVarP(
+		&console,
+		"console",
+		"c",
+		false,
+		"Format logger for the console",
+	)
+	cmd.Flags().Uint16VarP(
+		&port,
+		"port",
+		"p",
+		7390,
+		"Port to run the server on",
+	)
+	cmd.Flags().IntVarP(
+		&loops,
+		"eventloops",
+		"l",
+		runtime.NumCPU()/2,
+		"Number of EventLoops to start",
+	)
+	cmd.Flags().IntVarP(
+		&loglevel,
+		"loglevel",
+		"v",
+		int(zerolog.InfoLevel),
+		"Log level",
+	)
+	cmd.Flags().StringVarP(
+		&path,
+		"dir",
+		"d",
+		defaultPath(),
+		"Root data directory",
+	)
+	cmd.Flags().BoolVarP(
+		&singlemode,
+		"singlemode",
+		"s",
+		false,
+		"Start the cluster in single mode",
+	)
 }
 
 func defaultPath() string {
@@ -192,7 +171,7 @@ func start(cmd *cobra.Command, args []string) {
 	ipdb.Logger = ipdb.DaemonLogger(console)
 
 	zerolog.SetGlobalLevel(zerolog.Level(loglevel))
-	zerolog.TimeFieldFormat = time.Stamp
+	zerolog.TimeFieldFormat = time.RFC822Z
 
 	// Ensure only 1 instance through PID lock
 	pidfile := single.New(ipdb.Name)
@@ -262,6 +241,13 @@ type Daemon struct {
 }
 
 func (d *Daemon) OnStart() error {
+	if path != ":memory:" {
+		err := os.MkdirAll(path, 0700)
+		if err != nil {
+			d.Logger.Error().Err(err)
+			return err
+		}
+	}
 	// Handle os signals.
 	c := make(chan os.Signal, 1)
 	slogger := ipdb.Logger.With().Str("logger", "os.signal").Logger()

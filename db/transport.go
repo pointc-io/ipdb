@@ -18,13 +18,12 @@ import (
 	"github.com/hashicorp/raft"
 	"github.com/pointc-io/ipdb/redcon"
 	"github.com/pointc-io/ipdb/service"
-	"github.com/Workiva/go-datastructures/threadsafe/err"
 )
 
 var (
 	errInvalidNumberOfArgs = errors.New("invalid number or arguments")
 	errInvalidCommand      = errors.New("invalid Cmd")
-	errInvalidRequest = errors.New("invalid request")
+	errInvalidRequest      = errors.New("invalid request")
 	errInvalidResponse     = errors.New("invalid response")
 )
 
@@ -261,7 +260,7 @@ func (t *RaftTransport) AppendEntries(id raft.ServerID, target raft.ServerAddres
 
 func (t *RaftTransport) handleAppendEntries(o []byte, args [][]byte) ([]byte, error) {
 	if len(args) != 3 {
-		return redcon.AppendError(o, "ERR " + errInvalidNumberOfArgs.Error()), errInvalidNumberOfArgs
+		return redcon.AppendError(o, "ERR "+errInvalidNumberOfArgs.Error()), errInvalidNumberOfArgs
 	}
 	var rpc raft.RPC
 	var aer raft.AppendEntriesRequest
@@ -274,7 +273,7 @@ func (t *RaftTransport) handleAppendEntries(o []byte, args [][]byte) ([]byte, er
 	t.consumer <- rpc
 	rresp := <-respChan
 	if rresp.Error != nil {
-		return redcon.AppendError(o, "ERR " + rresp.Error.Error()), rresp.Error
+		return redcon.AppendError(o, "ERR "+rresp.Error.Error()), rresp.Error
 	}
 	resp, ok := rresp.Response.(*raft.AppendEntriesResponse)
 	if !ok {
@@ -316,12 +315,12 @@ func (t *RaftTransport) RequestVote(id raft.ServerID, target raft.ServerAddress,
 
 func (t *RaftTransport) handleRequestVote(o []byte, args [][]byte) ([]byte, error) {
 	if len(args) != 3 {
-		return redcon.AppendError(o, "ERR " + errInvalidNumberOfArgs.Error()), errInvalidNumberOfArgs
+		return redcon.AppendError(o, "ERR "+errInvalidNumberOfArgs.Error()), errInvalidNumberOfArgs
 	}
 	var rpc raft.RPC
 	var aer raft.RequestVoteRequest
 	if err := json.Unmarshal(args[2], &aer); err != nil {
-		return redcon.AppendError(o, "ERR " + err.Error()), err
+		return redcon.AppendError(o, "ERR "+err.Error()), err
 	}
 	rpc.Command = &aer
 	respChan := make(chan raft.RPCResponse)
@@ -329,7 +328,7 @@ func (t *RaftTransport) handleRequestVote(o []byte, args [][]byte) ([]byte, erro
 	t.consumer <- rpc
 	rresp := <-respChan
 	if rresp.Error != nil {
-		return redcon.AppendError(o, "ERR " + rresp.Error.Error()), rresp.Error
+		return redcon.AppendError(o, "ERR "+rresp.Error.Error()), rresp.Error
 	}
 	resp, ok := rresp.Response.(*raft.RequestVoteResponse)
 	if !ok {

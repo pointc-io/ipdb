@@ -1,11 +1,13 @@
 package db
 
 import (
-	"github.com/pointc-io/ipdb/service"
-	"github.com/pointc-io/ipdb"
-
-	"fmt"
 	"path/filepath"
+	"os"
+
+	"github.com/pointc-io/ipdb"
+	"github.com/pointc-io/ipdb/service"
+	"sync"
+	"fmt"
 )
 
 // DB is broken up into Partitions that are assigned to a slot.
@@ -30,6 +32,8 @@ type DB struct {
 	path    string
 	cluster *Shard
 	shards  []*Shard
+
+	mu sync.Mutex
 }
 
 func NewDB(id, path string) *DB {
@@ -48,33 +52,59 @@ func (d *DB) Get(key string) *Shard {
 }
 
 func (d *DB) Shard(id int) *Shard {
+	if id == -1 {
+		return d.cluster
+	}
+	if id < 0 || id >= len(d.shards) {
+		return nil
+	}
 	return d.shards[id]
 }
 
-func (d *DB) OnStart() error {
-	var clusterPath string
+func (d *DB) shardPath(id int) (string, error) {
 	if d.path == ":memory:" {
-		clusterPath = ":memory:"
+		return d.path, nil
 	} else {
-		clusterPath = filepath.Join(d.path, "cluster")
+		var path string
+		if id == -1 {
+			path = filepath.Join(d.path, "cluster")
+		} else {
+			path = filepath.Join(d.path, "shards", fmt.Sprintf("%d", id))
+		}
+		return path, os.MkdirAll(path, 0700)
+	}
+}
+
+func (d *DB) OnStart() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	clusterPath, err := d.shardPath(-1)
+
+	if err != nil {
+		d.Logger.Fatal().Err(err).Msgf("failed to mkdirs for \"%s\"", clusterPath)
+		return err
 	}
 
 	// Load cluster shard.
-	d.cluster = NewShard(d.path == ":memory:", clusterPath, d.id)
-	err := d.cluster.Start()
+	d.cluster = NewShard(-1, d.path == ":memory:", clusterPath, d.id)
+	err = d.cluster.Start()
 	if err != nil {
 		d.Logger.Error().Err(err).Msg("cluster db start failed")
 		return err
 	}
 
+	if d.cluster.db.IsEmpty() {
+		shardPath, err := d.shardPath(-1)
 
-
-	for i := 0; i < len(d.shards); i++ {
-		ppath := d.path
-		if ppath != ":memory:" {
-			ppath = fmt.Sprintf("%s%sp-%d.db", d.path, string(filepath.Separator), i)
+		if err != nil {
+			d.Logger.Fatal().Err(err).Msgf("failed to mkdirs for \"%s\"", clusterPath)
+			return err
 		}
-		d.shards[i] = NewShard(false, ppath, "")
+
+		// Create the first shard.
+		shard := NewShard(0, d.path == ":memory:", shardPath, d.id)
+		d.shards = append(d.shards, shard)
 	}
 
 	for i := 0; i < len(d.shards); i++ {
@@ -84,7 +114,7 @@ func (d *DB) OnStart() error {
 			for a := 0; a < i; a++ {
 				d.shards[a].Stop()
 			}
-
+			d.Logger.Error().Err(err).Msgf("failed to start shard %d", i)
 			return err
 		}
 	}
