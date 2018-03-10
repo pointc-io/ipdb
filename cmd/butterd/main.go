@@ -47,18 +47,18 @@ func main() {
 
 	var cmdStatus = &cobra.Command{
 		Use:   "status",
-		Short: "Prints the current status of " + ipdb.Name,
+		Short: "Prints the current status of " + butterd.Name,
 		Long:  ``,
 		Args:  cobra.MinimumNArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			pidfile := single.New(ipdb.Name)
+			pidfile := single.New(butterd.Name)
 			l := pidfile.Lock()
 			if l.Success {
 				pidfile.Unlock()
-				ipdb.Logger.Info().Msg("daemon is not running")
+				butterd.Logger.Info().Msg("daemon is not running")
 				return
 			} else {
-				ipdb.Logger.Info().Msgf("daemon pid %d", l.Pid)
+				butterd.Logger.Info().Msgf("daemon pid %d", l.Pid)
 			}
 		},
 	}
@@ -82,7 +82,7 @@ func main() {
 	)
 
 	var cmdRoot = &cobra.Command{
-		Use: ipdb.Name,
+		Use: butterd.Name,
 		// Default to start as daemon
 		Run: start,
 	}
@@ -90,9 +90,9 @@ func main() {
 	cmdRoot.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print the version number",
-		Long:  `All software has versions. This is ` + ipdb.Name + `'s`,
+		Long:  `All software has versions. This is ` + butterd.Name + `'s`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(fmt.Sprintf("%s %s", ipdb.Name, ipdb.Version))
+			fmt.Println(fmt.Sprintf("%s %s", butterd.Name, butterd.VersionStr))
 		},
 	})
 	cmdRoot.AddCommand(cmdStart, cmdStop, cmdStatus)
@@ -156,11 +156,11 @@ func defaultPath() string {
 
 // Viper init
 func config() {
-	viper.SetConfigName("config")                            // name of config file (without extension)
-	viper.AddConfigPath(fmt.Sprintf("/etc/%s/", ipdb.Name))  // path to look for the config file in
-	viper.AddConfigPath(fmt.Sprintf("$HOME/.%s", ipdb.Name)) // call multiple times to add many search paths
-	viper.AddConfigPath(".")                                 // optionally look for config in the working directory
-	err := viper.ReadInConfig()                              // Find and read the config file
+	viper.SetConfigName("config")                               // name of config file (without extension)
+	viper.AddConfigPath(fmt.Sprintf("/etc/%s/", butterd.Name))  // path to look for the config file in
+	viper.AddConfigPath(fmt.Sprintf("$HOME/.%s", butterd.Name)) // call multiple times to add many search paths
+	viper.AddConfigPath(".")                                    // optionally look for config in the working directory
+	err := viper.ReadInConfig()                                 // Find and read the config file
 	if err != nil { // incoming errors reading the config file
 		//panic(fmt.Errorf("Fatal error config file: %s \n", err))
 	}
@@ -168,26 +168,28 @@ func config() {
 
 func start(cmd *cobra.Command, args []string) {
 	// Change logger to Daemon Logger
-	ipdb.Logger = ipdb.DaemonLogger(console)
+	butterd.Logger = butterd.DaemonLogger(console)
 
 	zerolog.SetGlobalLevel(zerolog.Level(loglevel))
 	zerolog.TimeFieldFormat = time.RFC822Z
 
-	// Ensure only 1 instance through PID lock
-	pidfile := single.New(ipdb.Name)
-	lockResult := pidfile.Lock()
-	if !lockResult.Success {
-		ipdb.Logger.Error().Msgf("process already running pid:%d -- localhost:%d", lockResult.Pid, lockResult.Port)
-		return
+	if !console {
+		// Ensure only 1 instance through PID lock
+		pidfile := single.New(butterd.Name)
+		lockResult := pidfile.Lock()
+		if !lockResult.Success {
+			butterd.Logger.Error().Msgf("process already running pid:%d -- localhost:%d", lockResult.Pid, lockResult.Port)
+			return
+		}
+		defer pidfile.Unlock()
 	}
-	defer pidfile.Unlock()
 
 	// Create, Start and Wait for Daemon to exit
 	app := &Daemon{}
-	app.BaseService = *service.NewBaseService(ipdb.Logger, "daemon", app)
+	app.BaseService = *service.NewBaseService(butterd.Logger, "daemon", app)
 	err := app.Start()
 	if err != nil {
-		ipdb.Logger.Error().Err(err)
+		butterd.Logger.Error().Err(err)
 		return
 	}
 	app.Wait()
@@ -195,42 +197,42 @@ func start(cmd *cobra.Command, args []string) {
 
 func stop(force bool) {
 	// Ensure only 1 instance.
-	pidfile := single.New(ipdb.Name)
+	pidfile := single.New(butterd.Name)
 	l := pidfile.Lock()
 	if l.Success {
 		pidfile.Unlock()
-		ipdb.Logger.Info().Msg("daemon is not running")
+		butterd.Logger.Info().Msg("daemon is not running")
 		return
 	}
 
 	if l.Pid > 0 {
 		process, err := os.FindProcess(l.Pid)
 		if err != nil {
-			ipdb.Logger.Info().Msgf("failed to find daemon pid %d", l.Pid)
-			ipdb.Logger.Error().Err(err)
+			butterd.Logger.Info().Msgf("failed to find daemon pid %d", l.Pid)
+			butterd.Logger.Error().Err(err)
 		} else if process == nil {
-			ipdb.Logger.Info().Msgf("failed to find daemon pid %d", l.Pid)
+			butterd.Logger.Info().Msgf("failed to find daemon pid %d", l.Pid)
 		} else {
 			if force {
-				ipdb.Logger.Info().Msgf("killing daemon pid %d", l.Pid)
+				butterd.Logger.Info().Msgf("killing daemon pid %d", l.Pid)
 				err = process.Kill()
 				if err != nil {
-					ipdb.Logger.Error().Err(err)
+					butterd.Logger.Error().Err(err)
 				} else {
-					ipdb.Logger.Info().Msg("daemon was killed")
+					butterd.Logger.Info().Msg("daemon was killed")
 				}
 			} else {
-				ipdb.Logger.Info().Msgf("sending SIGTERM signal to pid %d", l.Pid)
+				butterd.Logger.Info().Msgf("sending SIGTERM signal to pid %d", l.Pid)
 				err := process.Signal(syscall.SIGTERM)
 				if err != nil {
-					ipdb.Logger.Error().Err(err)
+					butterd.Logger.Error().Err(err)
 				} else {
-					ipdb.Logger.Info().Msgf("SIGTERM pid %d", l.Pid)
+					butterd.Logger.Info().Msgf("SIGTERM pid %d", l.Pid)
 				}
 			}
 		}
 	} else {
-		ipdb.Logger.Info().Msg("daemon is not running")
+		butterd.Logger.Info().Msg("daemon is not running")
 	}
 }
 
@@ -250,7 +252,7 @@ func (d *Daemon) OnStart() error {
 	}
 	// Handle os signals.
 	c := make(chan os.Signal, 1)
-	slogger := ipdb.Logger.With().Str("logger", "os.signal").Logger()
+	slogger := butterd.Logger.With().Str("logger", "os.signal").Logger()
 	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		s := <-c
@@ -275,7 +277,7 @@ func (d *Daemon) OnStart() error {
 	}()
 
 	// Start Server.
-	d.server = server.NewServer(fmt.Sprintf(":%d", int(port)), path, loops)
+	d.server = server.NewServer(fmt.Sprintf("localhost:%d", int(port)), path, loops)
 	err := d.server.Start()
 
 	return err

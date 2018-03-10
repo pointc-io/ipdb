@@ -9,8 +9,6 @@ import (
 	"strings"
 	"github.com/spf13/cobra"
 	"github.com/pointc-io/ipdb"
-	"path/filepath"
-
 	"github.com/garyburd/redigo/redis"
 	"encoding/json"
 	"log"
@@ -22,29 +20,31 @@ var join string
 var nodeId string
 var dataDir string
 
-var cl *db.Shard
+var shard *db.Shard
 var conn redis.Conn
 
 func main() {
-	log.SetOutput(ipdb.Logger)
+	log.SetOutput(butterd.Logger)
 
 	var cmdRoot = &cobra.Command{
-		Use: ipdb.Name,
+		Use: butterd.Name,
 		// Default to start as daemon
 		Run: func(cmd *cobra.Command, args []string) {
 			if nodeId == "" {
 				nodeId = bind
 			}
-			server := evred.NewServer(bind, 1, onCommand)
+			server := evred.NewServer(bind, 1)
+			server.SetHandler(onCommand)
 			err := server.Start()
 			if err != nil {
 				panic(err)
 			}
 
-			cl = db.NewShard(join == "", filepath.Join(dataDir, strings.Replace(nodeId, ":", "", 1)), nodeId)
-			cl.Bind = bind
-			err = cl.Start()
-			//err = cl.Open(join == "", nodeId)
+			// filepath.Join(dataDir, strings.Replace(nodeId, ":", "", 1)),
+			shard = db.NewShard(0, join == "", ":memory:", nodeId)
+			shard.Bind = bind
+			err = shard.Start()
+			//err = shard.Open(join == "", nodeId)
 			if err != nil {
 				panic(err)
 			}
@@ -109,8 +109,7 @@ func main() {
 type Handler struct {
 }
 
-
-func onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Action) {
+func onCommand(conn *evred.Conn, args [][]byte) (out []byte, action evio.Action) {
 	name := strings.ToUpper(string(args[0]))
 
 	switch name {
@@ -123,7 +122,7 @@ func onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Acti
 
 		// Leader addr
 	case "CLUSTERLEADER":
-		leader, err := cl.Leader()
+		leader, err := shard.Leader()
 		if err != nil {
 			out = redcon.AppendError(out, "ERR: "+err.Error())
 		} else {
@@ -131,10 +130,10 @@ func onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Acti
 		}
 
 	case "CLUSTERSTATE":
-		out = redcon.AppendBulkString(out, cl.State().String())
+		out = redcon.AppendBulkString(out, shard.State().String())
 
 	case "CLUSTERSTATS":
-		stats := cl.Stats()
+		stats := shard.Stats()
 		b, err := json.Marshal(stats)
 		if err != nil {
 			out = redcon.AppendError(out, err.Error())
@@ -143,7 +142,7 @@ func onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Acti
 		}
 
 	case "CLUSTERLEAVE":
-		err := cl.Leave(string(args[1]), string(args[1]))
+		err := shard.Leave(string(args[1]), string(args[1]))
 		if err != nil {
 			out = redcon.AppendError(out, err.Error())
 		} else {
@@ -151,7 +150,7 @@ func onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Acti
 		}
 
 	case "CLUSTERJOIN":
-		err := cl.Join(string(args[1]), string(args[1]))
+		err := shard.Join(string(args[1]), string(args[1]))
 		if err != nil {
 			out = redcon.AppendError(out, err.Error())
 		} else {
@@ -159,7 +158,7 @@ func onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Acti
 		}
 
 	case "CLUSTERSNAPSHOT":
-		err := cl.Snapshot()
+		err := shard.Snapshot()
 		if err != nil {
 			out = redcon.AppendError(out, err.Error())
 		} else {
@@ -175,12 +174,12 @@ func onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Acti
 		// RAFT Commands
 	case "RAFTSNAPSHOT":
 		// Detach
-		conn.Detach(cl.HandleInstallSnapshot(args[1]))
+		conn.Detach(shard.HandleInstallSnapshot(args[1]))
 		action = evio.Detach
 		//out = redcon.AppendOK(out)
 
 	case "RAFTSHRINK":
-		err := cl.ShrinkLog()
+		err := shard.ShrinkLog()
 		if err != nil {
 			out = redcon.AppendError(out, err.Error())
 		} else {
@@ -192,20 +191,10 @@ func onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Acti
 		// -1 = Shard
 		// 0+ = Shard
 		//if len(args) != 0
-		d, err := cl.AppendEntries(args)
-		if err != nil {
-			out = redcon.AppendError(out, err.Error())
-		} else {
-			out = redcon.AppendBulk(out, d)
-		}
+		out, _ = shard.AppendEntries(out, args)
 
 	case "RAFTVOTE":
-		d, err := cl.RequestVote(args)
-		if err != nil {
-			out = redcon.AppendError(out, err.Error())
-		} else {
-			out = redcon.AppendBulk(out, d)
-		}
+		out, _ = shard.RequestVote(out, args)
 
 	case "RAFTINSTALL":
 
@@ -220,7 +209,7 @@ func onCommand(conn *evred.RedConn, args [][]byte) (out []byte, action evio.Acti
 	return
 }
 
-func raftCommand(conn *evred.RedConn, name string, args [][]byte, pipeline func(conn *evred.RedConn, name string, args [][]byte) (out []byte, action evio.Action)) (out []byte, action evio.Action) {
+func raftCommand(conn *evred.Conn, name string, args [][]byte, pipeline func(conn *evred.Conn, name string, args [][]byte) (out []byte, action evio.Action)) (out []byte, action evio.Action) {
 	switch name {
 	default:
 		if pipeline == nil {
@@ -237,7 +226,7 @@ func raftCommand(conn *evred.RedConn, name string, args [][]byte, pipeline func(
 	case "RAFTSNAPSHOT":
 
 	case "RAFTSHRINK":
-		err := cl.Shrink()
+		err := shard.Shrink()
 		if err != nil {
 			out = redcon.AppendError(out, err.Error())
 		} else {

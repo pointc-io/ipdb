@@ -1,33 +1,39 @@
-package ipdb
+package butterd
 
 import (
 	"os"
-	"sync"
 	"os/user"
 	"path/filepath"
+
 	"github.com/rs/zerolog"
 	"github.com/rcrowley/go-metrics"
+	"github.com/blang/semver"
 )
 
-var Name = "btrd"
-var Version = "0.1.0-1" // SemVer
+var Name = "butterd"
+var VersionStr = "0.1.0-1" // SemVer
+var Version semver.Version
 var GIT = ""
-var Logger zerolog.Logger = CLILogger()
-var Registry = metrics.DefaultRegistry
+var Logger = CLILogger()
+var Metrics = metrics.DefaultRegistry
 var Path = ""
-
-var mu sync.Mutex
 
 func init() {
 	usr, err := user.Current()
 	if err != nil {
 		panic(err)
 	}
-	Path = filepath.Join(usr.HomeDir, ".ipdb")
+
+	Path = filepath.Join(usr.HomeDir, ".butterd")
+	err = os.MkdirAll(Path, 0700)
+	if err != nil {
+		panic(err)
+	}
+
+	Version, err = semver.Make(VersionStr)
 }
 
 func CLILogger() zerolog.Logger {
-	//l := zerolog.New(os.Stdout)
 	l := zerolog.New(zerolog.ConsoleWriter{
 		Out:     os.Stdout,
 		NoColor: false,

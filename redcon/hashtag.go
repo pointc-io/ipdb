@@ -1,4 +1,4 @@
-package db
+package redcon
 
 import (
 	"math/rand"

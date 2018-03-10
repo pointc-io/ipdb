@@ -4,36 +4,42 @@ import (
 	"sync"
 	"net"
 	"github.com/pointc-io/ipdb/evio"
-	"github.com/pointc-io/ipdb/redcon"
 )
 
-var Workers = redcon.DefaultPool
-var MaxConnBacklog = 2048
+var maxCommandBacklog = 2048
 
-type RedConn struct {
+
+type Conn struct {
 	id       int
 	addr     string
 	ev       *EvLoop
 	evaction evio.Action
 	done     bool
 
-	mu  sync.Mutex
-	in  []byte
-	out []byte // Out buffer
+	mu    sync.Mutex
+	in    []byte
+	out   []byte // Out buffer
+	multi bool
+	flush bool
 	//outb []byte
 
 	backlog        []Command
 	backlogOverage int
 	dispatched     Command
 
+	multis []Command
+
+	//commitlog []Command
+	//commitbuf []byte
+
 	detached   net.Conn
 	detachedFn func(conn net.Conn)
 }
 
 // Incoming REDIS protocol Cmd
-//func (c *RedConn) incoming(b []byte, name string, args [][]byte) (out []byte) {
+//func (c *Conn) incoming(b []byte, name string, args [][]byte) (out []byte) {
 //	out = b
-//	c.handler(c, args)
+//
 //	// Parse Command
 //	cmd := c.handler.parseCommand(name, args)
 //
@@ -56,12 +62,23 @@ type RedConn struct {
 //	return
 //}
 
-func (c *RedConn) dispatch(cmd Command) {
+
+func (c *Conn) Multi() {
+	if c.multi {
+		c.multi = false
+		c.flush = true
+	} else {
+		c.multi = true
+		c.flush = false
+	}
+}
+
+func (c *Conn) dispatch(cmd Command) {
 	c.dispatched = cmd
 	Workers.Dispatch(c)
 }
 
-func (c *RedConn) Run() {
+func (c *Conn) Run() {
 	// Was the job already canceled?
 	c.mu.Lock()
 	if c.dispatched == nil {
@@ -75,7 +92,7 @@ func (c *RedConn) Run() {
 	c.out = c.dispatched.Background(c.out)
 
 	if len(c.out) == l {
-		c.out = ERR(0, "Command not implemented").Invoke(c.out)
+		c.out = ERR("Command not implemented").Invoke(c.out)
 	}
 
 	c.mu.Lock()
@@ -87,23 +104,23 @@ func (c *RedConn) Run() {
 }
 
 // Inform the event loop to close this connection.
-func (c *RedConn) close() {
+func (c *Conn) close() {
 	c.evaction = evio.Close
 	c.wake()
 }
 
 // Called when the event loop has closed this connection.
-func (c *RedConn) closed() {
+func (c *Conn) closed() {
 	c.done = true
 }
 
 // Asks the event loop to schedule a write event for this connection.
-func (c *RedConn) wake() {
+func (c *Conn) wake() {
 	c.ev.Wake(c.id)
 }
 
 // Invoked on the event loop thread.
-func (c *RedConn) woke() (out []byte, action evio.Action) {
+func (c *Conn) woke() (out []byte, action evio.Action) {
 	// Set output buffer
 	c.mu.Lock()
 	if c.dispatched != nil {
@@ -154,7 +171,7 @@ func (c *RedConn) woke() (out []byte, action evio.Action) {
 
 // Begin accepts a new packet and returns a working sequence of
 // unprocessed bytes.
-func (c *RedConn) begin(packet []byte) (data []byte) {
+func (c *Conn) begin(packet []byte) (data []byte) {
 	data = packet
 	if len(c.in) > 0 {
 		c.in = append(c.in, data...)
@@ -164,7 +181,7 @@ func (c *RedConn) begin(packet []byte) (data []byte) {
 }
 
 // End shift the stream to match the unprocessed data.
-func (c *RedConn) end(data []byte) {
+func (c *Conn) end(data []byte) {
 	if len(data) > 0 {
 		if len(data) != len(c.in) {
 			c.in = append(c.in[:0], data...)
@@ -179,7 +196,7 @@ func (c *RedConn) end(data []byte) {
 	//}
 }
 
-func (c *RedConn) onDetached(conn net.Conn) {
+func (c *Conn) onDetached(conn net.Conn) {
 	c.mu.Lock()
 	c.detached = conn
 	fn := c.detachedFn
@@ -189,7 +206,7 @@ func (c *RedConn) onDetached(conn net.Conn) {
 	}
 }
 
-func (c *RedConn) Detach(fn func(conn net.Conn)) {
+func (c *Conn) Detach(fn func(conn net.Conn)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.detached == nil {

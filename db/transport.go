@@ -509,7 +509,7 @@ func (t *RaftTransport) handleInstallSnapshot(conn redcon.DetachedConn, arg []by
 //			dconn := conn.Detach()
 //			go func() {
 //				defer dconn.Close()
-//				t.handleInstallSnapshot(dconn, cmd.Args[1])
+//				t.HandleInstallSnapshot(dconn, cmd.Args[1])
 //			}()
 //			return
 //		}

@@ -43,6 +43,10 @@ type command struct {
 	Value string `json:"value,omitempty"`
 }
 
+type Applier interface {
+	Apply(shard *Shard, l *raft.Log) interface{}
+}
+
 // Shard is a partition of the total keyspace, where all changes are made via Raft consensus.
 // The entire database is a single BTree that may contain many sparse BTree indexes.
 // A shard is completely independent from every other shard.
@@ -65,6 +69,8 @@ type Shard struct {
 	trans     raft.Transport
 	store     bigStore
 	db        *buntdb.DB
+
+	applier Applier
 }
 
 // bigStore represents a raft store that conforms to
@@ -90,12 +96,14 @@ type shrinkable interface {
 }
 
 // New returns a new Shard.
-func NewShard(id int, enableSingle bool, path, localID string) *Shard {
+func NewShard(id int, enableSingle bool, path, localID string, applier Applier) *Shard {
 	s := &Shard{
 		id:           id,
 		Path:         path,
+		Bind:         localID,
 		localID:      localID,
 		enableSingle: enableSingle,
+		applier:      applier,
 		m:            make(map[string]string),
 	}
 	var name string
@@ -105,7 +113,7 @@ func NewShard(id int, enableSingle bool, path, localID string) *Shard {
 		name = fmt.Sprintf("shard-%d", s.id)
 	}
 
-	s.BaseService = *service.NewBaseService(ipdb.Logger, name, s)
+	s.BaseService = *service.NewBaseService(butterd.Logger, name, s)
 	return s
 }
 
@@ -134,26 +142,32 @@ func (s *Shard) OnStart() error {
 	}
 
 	// Create Transport
-	if s.Path == ":memory:" {
-		_, t := raft.NewInmemTransport("")
-		s.trans = t
-	} else {
-		s.transport = NewRaftTransport(s)
-		s.trans = s.transport
+	if s.Bind == "" {
 
-		err := s.transport.Start()
-		if err != nil {
-			s.Logger.Error().Err(err).Msg("raft transport start failed")
-			return err
-		}
 	}
+	//if s.Path == ":memory:" {
+	//	addr, t := raft.NewInmemTransport("")
+	//	s.trans = t
+	//	_ = addr
+	//	s.Logger.Info().Msgf("Transport: %s", addr)
+	//} else {
+	//s.transport = raft.NewTCPTransport(":16000", )
+	s.transport = NewRaftTransport(s)
+	s.trans = s.transport
+
+	err = s.transport.Start()
+	if err != nil {
+		s.Logger.Error().Err(err).Msg("raft transport start failed")
+		return err
+	}
+	//}
 
 	// Create Snapshot Store
 	if s.Path == ":memory:" {
 		s.snapshots = raft.NewInmemSnapshotStore()
 	} else {
 		// Create the snapshot store. This allows the Raft to truncate the log.
-		s.snapshots, err = raft.NewFileSnapshotStore(s.Path, retainSnapshotCount, os.Stdout)
+		s.snapshots, err = raft.NewFileSnapshotStore(s.Path, retainSnapshotCount, os.Stderr)
 		if err != nil {
 			s.transport.Stop()
 			s.Logger.Error().Err(err).Msg("file snapshot store failed")
@@ -178,7 +192,7 @@ func (s *Shard) OnStart() error {
 	s.store, err = raftfastlog.NewFastLogStore(
 		logpath,
 		raftfastlog.Medium,
-		ipdb.Logger.With().Str("logger", logname).Logger(),
+		butterd.Logger.With().Str("logger", logname).Logger(),
 	)
 	if err != nil {
 		s.transport.Stop()
@@ -188,7 +202,7 @@ func (s *Shard) OnStart() error {
 
 	bootstrap := s.db.IsEmpty()
 	if bootstrap {
-		config.StartAsLeader = true
+		//config.StartAsLeader = true
 	}
 
 	// Instantiate the Raft systems.
@@ -207,7 +221,7 @@ func (s *Shard) OnStart() error {
 			Servers: []raft.Server{
 				{
 					ID:      config.LocalID,
-					Address: s.transport.LocalAddr(),
+					Address: s.trans.LocalAddr(),
 				},
 			},
 		}
@@ -389,19 +403,21 @@ type fsm Shard
 
 // Apply applies a Raft log entry to the key-value store.
 func (f *fsm) Apply(l *raft.Log) interface{} {
-	var c command
-	if err := json.Unmarshal(l.Data, &c); err != nil {
-		f.Logger.Panic().Msgf("failed to unmarshal command: %s", err.Error())
-	}
+	return f.applier.Apply((*Shard)(f), l)
 
-	switch c.Op {
-	case "set":
-		return f.applySet(c.Key, c.Value)
-	case "delete":
-		return f.applyDelete(c.Key)
-	default:
-		panic(fmt.Sprintf("unrecognized command op: %s", c.Op))
-	}
+	//var c command
+	//if err := json.Unmarshal(l.Data, &c); err != nil {
+	//	f.Logger.Panic().Msgf("failed to unmarshal command: %s", err.Error())
+	//}
+	//
+	//switch c.Op {
+	//case "set":
+	//	return f.applySet(c.Key, c.Value)
+	//case "delete":
+	//	return f.applyDelete(c.Key)
+	//default:
+	//	panic(fmt.Sprintf("unrecognized command op: %s", c.Op))
+	//}
 }
 
 // Snapshot returns a snapshot of the key-value store.

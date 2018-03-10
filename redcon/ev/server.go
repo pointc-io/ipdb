@@ -13,15 +13,30 @@ import (
 	"github.com/pointc-io/ipdb/redcon"
 	"github.com/pointc-io/ipdb/evio"
 	"github.com/pointc-io/ipdb/service"
+	"strings"
+	"github.com/hashicorp/raft"
 )
 
-var notImplementedHandler = func(conn *RedConn, args [][]byte) (out []byte, action evio.Action) {
+var notImplementedHandler = func(out []byte, action evio.Action, conn *Conn, packet []byte, args [][]byte) ([]byte, evio.Action) {
 	out = redcon.AppendError(out, "ERR not implemented")
-	return
+	return out, action
+}
+
+type Handler interface {
+	ShardID(key string) int
+
+	Parse(conn *Conn, packet []byte, args [][]byte) Command
+
+	//NextCommand(out []byte, action evio.Action, conn *Conn, packet []byte, args [][]byte) ([]byte, evio.Action)
+
+	Commit(conn *Conn, shard int, commitlog []byte) (raft.ApplyFuture, error)
+}
+
+type CommitLog interface {
 }
 
 //
-type EvServer struct {
+type Server struct {
 	service.BaseService
 
 	// static values
@@ -49,20 +64,17 @@ type EvServer struct {
 	mu sync.RWMutex
 
 	// Handler
-	onCommand func(conn *RedConn, args [][]byte) (out []byte, action evio.Action)
+	handler Handler
 }
 
-func NewServer(host string, eventLoops int, onCommand func(conn *RedConn, args [][]byte) (out []byte, action evio.Action)) *EvServer {
+func NewServer(host string, eventLoops int) *Server {
 	if eventLoops < 1 {
 		eventLoops = 1
 	}
 	if eventLoops > runtime.NumCPU()*2 {
 		eventLoops = runtime.NumCPU() * 2
 	}
-	if onCommand == nil {
-		onCommand = notImplementedHandler
-	}
-	s := &EvServer{
+	s := &Server{
 		host: host,
 
 		statsTotalConns:    metrics.NewCounter(),
@@ -74,15 +86,17 @@ func NewServer(host string, eventLoops int, onCommand func(conn *RedConn, args [
 		mu: sync.RWMutex{},
 
 		loops: make([]*EvLoop, eventLoops),
-
-		onCommand: onCommand,
 	}
 
-	s.BaseService = *service.NewBaseService(ipdb.Logger, "evserver", s)
+	s.BaseService = *service.NewBaseService(butterd.Logger, "evserver", s)
 	return s
 }
 
-func (s *EvServer) OnStart() error {
+func (s *Server) SetHandler(handler Handler) {
+	s.handler = handler
+}
+
+func (s *Server) OnStart() error {
 	addr, err := net.ResolveTCPAddr("tcp", s.host)
 	if err != nil {
 		return err
@@ -111,7 +125,7 @@ func (s *EvServer) OnStart() error {
 	return nil
 }
 
-func (s *EvServer) OnStop() {
+func (s *Server) OnStop() {
 	s.action = evio.Shutdown
 	for _, loop := range s.loops {
 		err := loop.Stop()
@@ -131,10 +145,10 @@ type EvLoop struct {
 	service.BaseService
 
 	id   int
-	Host *EvServer
+	Host *Server
 	Ev   *evio.Server
 
-	conns map[int]*RedConn
+	conns map[int]*Conn
 
 	totalConns    metrics.Counter // counter for total connections
 	totalCommands metrics.Counter // counter for total commands
@@ -144,19 +158,19 @@ type EvLoop struct {
 	wg sync.WaitGroup
 }
 
-func NewEventLoop(id int, server *EvServer) *EvLoop {
+func NewEventLoop(id int, server *Server) *EvLoop {
 	e := &EvLoop{
 		id:    id,
 		Host:  server,
 		wg:    sync.WaitGroup{},
-		conns: make(map[int]*RedConn),
+		conns: make(map[int]*Conn),
 
 		totalConns:    metrics.NewCounter(),
 		totalCommands: metrics.NewCounter(),
 		totalBytesIn:  metrics.NewCounter(),
 		totalBytesOut: metrics.NewCounter(),
 	}
-	e.BaseService = *service.NewBaseService(ipdb.Logger, fmt.Sprintf("evloop-%d", id), e)
+	e.BaseService = *service.NewBaseService(butterd.Logger, fmt.Sprintf("evloop-%d", id), e)
 	return e
 }
 
@@ -191,8 +205,8 @@ func (e *EvLoop) serve() {
 		return
 	}
 	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
-		// Create new RedConn
-		c := &RedConn{
+		// Create new Conn
+		c := &Conn{
 			id: id,
 			ev: e,
 		}
@@ -219,10 +233,10 @@ func (e *EvLoop) serve() {
 
 		return
 	}
-	events.Postwrite = func(id int, amount, remaining int) (action evio.Action) {
-		s.bytesOut.Inc(int64(amount))
-		return
-	}
+	//events.Postwrite = func(id int, amount, remaining int) (action evio.Action) {
+	//	s.bytesOut.Inc(int64(amount))
+	//	return
+	//}
 	events.Detached = func(id int, conn net.Conn) (action evio.Action) {
 		c, ok := conns[id]
 		if !ok {
@@ -249,7 +263,7 @@ func (e *EvLoop) serve() {
 			return c.woke()
 		}
 
-		s.bytesIn.Inc(int64(len(in)))
+		//s.bytesIn.Inc(int64(len(in)))
 
 		// Does the connection have some news to tell the event loop?
 		if c.evaction != evio.None {
@@ -263,12 +277,65 @@ func (e *EvLoop) serve() {
 		// Zero copy if possible strategy.
 		data := c.begin(in)
 
+		var packet []byte
 		var complete bool
 		var err error
 		var args [][]byte
+		var cmd Command
+		var cmdCount = 0
+
+		var commitMap map[int]struct {
+			cmds []Command
+			buf  []byte
+		}
+
+		flush := func() {
+			for shardID, group := range commitMap {
+				l := len(group.cmds)
+				if l == 0 {
+					continue
+				}
+
+				// Commit
+				future, err := s.handler.Commit(c, shardID, group.buf)
+
+				if err != nil {
+					for i := 0; i < l; i++ {
+						out = redcon.AppendError(out, "ERR "+err.Error())
+					}
+				} else if err = future.Error(); err != nil {
+					for i := 0; i < l; i++ {
+						out = redcon.AppendError(out, "ERR "+err.Error())
+					}
+				} else if resp := future.Response(); resp != nil {
+					if buf, ok := resp.([]byte); ok {
+						out = append(out, buf...)
+					} else {
+						switch t := resp.(type) {
+						case string:
+							out = redcon.AppendBulkString(out, t)
+						default:
+							for i := 0; i < l; i++ {
+								out = redcon.AppendError(out, fmt.Sprintf("ERR apply return type %v", t))
+							}
+						}
+					}
+				} else {
+					for i := 0; i < l; i++ {
+						out = redcon.AppendOK(out)
+					}
+				}
+
+				delete(commitMap, shardID)
+			}
+		}
 
 		for action == evio.None {
-			complete, args, _, data, err = redcon.ReadNextCommand(data, args[:0])
+			//if cmd != nil {
+			//	commands = append(commands, cmd)
+			//}
+			// Read next command.
+			packet, complete, args, _, data, err = redcon.ReadNextCommand2(data, args[:0])
 
 			if err != nil {
 				action = evio.Close
@@ -283,16 +350,100 @@ func (e *EvLoop) serve() {
 			}
 
 			if len(args) > 0 {
-				out, action = s.onCommand(c, args)
+				// Parse Command
+				cmd = s.handler.Parse(c, packet, args)
+				cmdCount++
 
-				// First argument is the Cmd string.
-				//out = c.incoming(out, strings.ToUpper(string(args[0])), args)
+				if cmd == nil {
+					cmd = ERR(fmt.Sprintf("ERR command '%s' not found", strings.ToUpper(string(args[0]))))
+				}
+
+				//commands = append(commands, cmd)
+
+				if cmd.IsWrite() {
+					key := string(args[1])
+					shardID := s.handler.ShardID(key)
+
+					// Add to commit log.
+					if commitMap == nil {
+						commitMap = make(map[int]struct {
+							cmds []Command
+							buf  []byte
+						})
+						commitMap[shardID] = struct {
+							cmds []Command
+							buf  []byte
+						}{
+							cmds: []Command{cmd},
+							buf:  packet,
+						}
+					} else {
+						group, ok := commitMap[shardID]
+						if !ok {
+							commitMap[shardID] = struct {
+								cmds []Command
+								buf  []byte
+							}{
+								cmds: []Command{cmd},
+								buf:  packet,
+							}
+						} else {
+							group.cmds = append(group.cmds, cmd)
+							group.buf = append(group.buf, packet...)
+						}
+					}
+				} else {
+					// Commit if necessary
+					if len(commitMap) > 0 {
+						flush()
+					}
+
+					// Append directly.
+					out = cmd.Invoke(out)
+				}
+
+				//if !dispatched {
+				//	before := len(out)
+				//	out = cmd.Invoke(out)
+				//
+				//	// Do we need to dispatch on Worker pool?
+				//	if len(out) == before {
+				//		dispatched = true
+				//		c.dispatch(cmd)
+				//	} else {
+				//		commands = append(commands, cmd)
+				//
+				//		if cmd.IsWrite() {
+				//			// Add to commit log.
+				//			c.commitlog = append(c.commitlog, cmd)
+				//			c.commitbuf = cmd.Commit(c.commitbuf, packet)
+				//		} else {
+				//		}
+				//	}
+				//} else {
+				//	// Append onto connection backlog
+				//	c.backlog = append(c.backlog, cmd)
+				//}
 			}
 		}
 
 		// Copy partial Cmd data if any.
 		c.end(data)
-		return
+
+		if action == evio.Close {
+			return
+		}
+
+		if cmd == nil {
+			return out, c.evaction
+		}
+
+		// Flush commit buffer
+		if len(commitMap) > 0 {
+			flush()
+		}
+
+		return out, c.evaction
 	}
 
 	err := evio.ServeListener(events, false, s.listener)

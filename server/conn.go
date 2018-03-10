@@ -8,7 +8,7 @@ package server
 //	"github.com/pointc-io/ipdb/action"
 //)
 //
-//var Workers = worker.DefaultPool
+//var Workers = worker.Workers
 //var MaxConnBacklog = 2048
 //
 //type dbConn struct {

@@ -1,4 +1,4 @@
-package redcon
+package evred
 
 import (
 	"time"
@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	DefaultPool = NewWorkerPool(context.Background(), 0, 0)
+	Workers = NewWorkerPool(context.Background(), 0, 0)
 )
 
 const (
@@ -53,7 +53,7 @@ type WorkerPool struct {
 	gets      metrics.Counter
 	puts      metrics.Counter
 
-	wg *sync.WaitGroup
+	wg sync.WaitGroup
 }
 
 func (w *WorkerPool) Name() string {
@@ -77,7 +77,7 @@ func NewWorkerPool(ctx context.Context, min, max int) *WorkerPool {
 		mu:      sync.Mutex{},
 		min:     int64(min),
 		max:     int64(max),
-		wg:      &sync.WaitGroup{},
+		wg:      sync.WaitGroup{},
 		pool:    new(sync.Pool),
 		workers: make([]*Worker, min),
 
@@ -197,7 +197,7 @@ func (w *WorkerPool) Get() *Worker {
 		pool:  w,
 		//cond:  &sync.Cond{L: &sync.Mutex{}},
 		//job:  noopJob,
-		wg:   &sync.WaitGroup{},
+		wg:   sync.WaitGroup{},
 		jobs: make(chan WorkerJob, 1),
 	}
 	wkr.wg.Add(1)
@@ -208,7 +208,7 @@ func (w *WorkerPool) Get() *Worker {
 	// Track goroutine exit
 	w.wg.Add(1)
 	// Start worker
-	go wkr.run(w.wg)
+	go wkr.run(&w.wg)
 
 	// Return Worker
 	return wkr
@@ -251,7 +251,7 @@ type Worker struct {
 	state int32
 	pool  *WorkerPool
 	//cond  *sync.Cond
-	wg *sync.WaitGroup
+	wg sync.WaitGroup
 	//job  WorkerJob
 	jobs chan WorkerJob
 }

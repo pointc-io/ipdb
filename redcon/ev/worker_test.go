@@ -1,4 +1,4 @@
-package redcon
+package evred
 
 import (
 	"testing"
