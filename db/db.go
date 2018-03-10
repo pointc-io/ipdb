@@ -173,6 +173,10 @@ func (d *DB) OnStop() {
 	}
 }
 
+func (d *DB) Apply2(shard *Shard, l *raft.Log) interface{} {
+	return true
+}
+
 func (d *DB) Apply(shard *Shard, l *raft.Log) interface{} {
 	tx, err := shard.db.Begin(true)
 	if err != nil {
@@ -277,6 +281,7 @@ func (d *DB) Parse(conn *evred.Conn, packet []byte, args [][]byte) evred.Command
 		return evred.RAW(redcon.AppendOK(nil))
 
 	case "SET":
+		//return evred.RAW(redcon.AppendOK(nil))
 		return &evred.WriteCmd{}
 
 	case "DEL":

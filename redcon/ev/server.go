@@ -284,7 +284,7 @@ func (e *EvLoop) serve() {
 		var cmd Command
 		var cmdCount = 0
 
-		var commitMap map[int]struct {
+		var commitMap map[int]*struct {
 			cmds []Command
 			buf  []byte
 		}
@@ -364,34 +364,64 @@ func (e *EvLoop) serve() {
 					key := string(args[1])
 					shardID := s.handler.ShardID(key)
 
+					b := make([]byte, len(packet))
+					copy(b, packet)
+
 					// Add to commit log.
 					if commitMap == nil {
-						commitMap = make(map[int]struct {
+						commitMap = make(map[int]*struct {
 							cmds []Command
 							buf  []byte
 						})
-						commitMap[shardID] = struct {
+						commitMap[shardID] = &struct {
 							cmds []Command
 							buf  []byte
 						}{
 							cmds: []Command{cmd},
-							buf:  packet,
+							buf:  b,
 						}
 					} else {
 						group, ok := commitMap[shardID]
 						if !ok {
-							commitMap[shardID] = struct {
+							commitMap[shardID] = &struct {
 								cmds []Command
 								buf  []byte
 							}{
 								cmds: []Command{cmd},
-								buf:  packet,
+								buf:  b,
 							}
 						} else {
 							group.cmds = append(group.cmds, cmd)
-							group.buf = append(group.buf, packet...)
+							group.buf = append(group.buf, b...)
 						}
 					}
+
+					// Commit
+					//future, err := s.handler.Commit(c, shardID, packet)
+					//
+					//if err != nil {
+					//	out = redcon.AppendError(out, "ERR "+err.Error())
+					//} else if err = future.Error(); err != nil {
+					//	out = redcon.AppendError(out, "ERR "+err.Error())
+					//} else if resp := future.Response(); resp != nil {
+					//	if buf, ok := resp.([]byte); ok {
+					//		out = append(out, buf...)
+					//	} else {
+					//		switch t := resp.(type) {
+					//		case string:
+					//			out = redcon.AppendBulkString(out, t)
+					//		default:
+					//			out = redcon.AppendError(out, fmt.Sprintf("ERR apply return type %v", t))
+					//		}
+					//	}
+					//} else {
+					//	out = redcon.AppendOK(out)
+					//}
+
+					//_ = future
+					//_ = err
+					//
+					//out = redcon.AppendOK(out)
 				} else {
 					// Commit if necessary
 					if len(commitMap) > 0 {
@@ -442,6 +472,8 @@ func (e *EvLoop) serve() {
 		if len(commitMap) > 0 {
 			flush()
 		}
+
+		//e.Logger.Debug().Msgf("%d commands", cmdCount)
 
 		return out, c.evaction
 	}

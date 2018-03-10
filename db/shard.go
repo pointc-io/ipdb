@@ -206,7 +206,7 @@ func (s *Shard) OnStart() error {
 	}
 
 	// Instantiate the Raft systems.
-	s.raft, err = raft.NewRaft(config, (*fsm)(s), s.store, s.store, s.snapshots, s.transport)
+	s.raft, err = raft.NewRaft(config, (*fsm)(s), s.store, s.store, s.snapshots, s.trans)
 	if err != nil {
 		s.db.Close()
 		s.transport.Stop()
