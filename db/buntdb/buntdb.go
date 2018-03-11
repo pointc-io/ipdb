@@ -314,6 +314,30 @@ func (idx *index) rebuild() {
 	})
 }
 
+// Get without creating a Tx
+func (db *DB) Get(key string) (value string, err error) {
+	db.mu.RLock()
+	item := db.get(key)
+	db.mu.RUnlock()
+	if item == nil {
+		return "", ErrNotFound
+	} else {
+		return item.val, nil
+	}
+}
+
+// Get without creating a Tx
+func (db *DB) Set(key string, val string) (value string, err error) {
+	db.mu.Lock()
+	item := db.insertIntoDatabase(&dbItem{key:key, val: val})
+	db.mu.Unlock()
+	if item == nil {
+		return "", ErrNotFound
+	} else {
+		return item.val, nil
+	}
+}
+
 // CreateIndex builds a new index and populates it with items.
 // The items are ordered in an b-tree and can be retrieved using the
 // Ascend* and Descend* methods.
@@ -961,6 +985,20 @@ func (db *DB) IsEmpty() bool {
 		return nil
 	})
 	return empty
+}
+
+func (db *DB) NumKeys() int {
+	size := 0
+	db.View(func(tx *Tx) error {
+		l, err := tx.Len()
+		if err != nil {
+			return err
+		}
+		size = l
+
+		return nil
+	})
+	return size
 }
 
 // View executes a function within a managed read-only transaction.

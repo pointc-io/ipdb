@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -14,20 +15,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/garyburd/redigo/redis"
 	"github.com/hashicorp/raft"
+	"github.com/garyburd/redigo/redis"
 	"github.com/pointc-io/ipdb/redcon"
 	"github.com/pointc-io/ipdb/service"
+	"github.com/pointc-io/ipdb/redcon/ev"
 )
 
 var (
 	errInvalidNumberOfArgs = errors.New("invalid number or arguments")
-	errInvalidCommand      = errors.New("invalid Cmd")
+	errInvalidCommand      = errors.New("invalid cmd")
 	errInvalidRequest      = errors.New("invalid request")
 	errInvalidResponse     = errors.New("invalid response")
 )
 
-type RaftTransport struct {
+type RESPTransport struct {
 	service.BaseService
 
 	id       int
@@ -41,8 +43,8 @@ type RaftTransport struct {
 	closed bool
 }
 
-func NewRaftTransport(shard *Shard) *RaftTransport {
-	t := &RaftTransport{
+func NewRaftTransport(shard *Shard) *RESPTransport {
+	t := &RESPTransport{
 		id:       shard.id,
 		addr:     raft.ServerAddress(shard.Bind),
 		consumer: make(chan raft.RPC),
@@ -53,11 +55,11 @@ func NewRaftTransport(shard *Shard) *RaftTransport {
 	return t
 }
 
-func (t *RaftTransport) OnStart() error {
+func (t *RESPTransport) OnStart() error {
 	return nil
 }
 
-func (t *RaftTransport) OnStop() {
+func (t *RESPTransport) OnStop() {
 	if err := t.Close(); err != nil {
 		t.Logger.Error().Err(err)
 	}
@@ -86,7 +88,7 @@ func newTargetPool(target string) *redis.Pool {
 }
 
 // Close is used to permanently disable the transport
-func (t *RaftTransport) Close() error {
+func (t *RESPTransport) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
@@ -101,7 +103,7 @@ func (t *RaftTransport) Close() error {
 }
 
 // getPool returns a usable pool for obtaining a connection to the specified target.
-func (t *RaftTransport) getPool(target string) (*redis.Pool, error) {
+func (t *RESPTransport) getPool(target string) (*redis.Pool, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
@@ -116,7 +118,7 @@ func (t *RaftTransport) getPool(target string) (*redis.Pool, error) {
 }
 
 // getConn returns a connection to the target.
-func (t *RaftTransport) getConn(target string) (redis.Conn, error) {
+func (t *RESPTransport) getConn(target string) (redis.Conn, error) {
 	pool, err := t.getPool(target)
 	if err != nil {
 		return nil, err
@@ -125,8 +127,28 @@ func (t *RaftTransport) getConn(target string) (redis.Conn, error) {
 }
 
 // AppendEntriesPipeline returns an interface that can be used to pipeline AppendEntries requests.
-func (t *RaftTransport) AppendEntriesPipeline(id raft.ServerID, target raft.ServerAddress) (raft.AppendPipeline, error) {
+func (t *RESPTransport) AppendEntriesPipeline(id raft.ServerID, target raft.ServerAddress) (raft.AppendPipeline, error) {
 	return nil, raft.ErrPipelineReplicationNotSupported
+}
+
+type pipeline struct {
+}
+
+// AppendEntries is used to add another request to the pipeline.
+// The send may block which is an effective form of back-pressure.
+func (p *pipeline) AppendEntries(args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) (raft.AppendFuture, error) {
+	return nil, nil
+}
+
+// Consumer returns a channel that can be used to consume
+// response futures when they are ready.
+func (p *pipeline) Consumer() <-chan raft.AppendFuture {
+	return nil
+}
+
+// Close closes the pipeline and cancels all inflight RPCs
+func (p *pipeline) Close() error {
+	return nil
 }
 
 // encodeAppendEntriesRequest encodes AppendEntriesRequest arguments into a
@@ -234,31 +256,31 @@ func decodeAppendEntriesResponse(b []byte, args *raft.AppendEntriesResponse) boo
 }
 
 // AppendEntries implements the Transport interface.
-func (t *RaftTransport) AppendEntries(id raft.ServerID, target raft.ServerAddress, args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) error {
+func (t *RESPTransport) AppendEntries(id raft.ServerID, target raft.ServerAddress, args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) error {
 	conn, err := t.getConn(string(target))
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	reply, err := conn.Do("RAFTAPPEND", t.id, encodeAppendEntriesRequest(args))
+	reply, err := conn.Do(raftAppendName, t.id, encodeAppendEntriesRequest(args))
 	if err != nil {
 		return err
 	}
 	switch val := reply.(type) {
 	default:
-		return errors.New("invalid response")
+		return errInvalidResponse
 	case redis.Error:
 		return val
 	case []byte:
 		if !decodeAppendEntriesResponse(val, resp) {
-			return errors.New("invalid response")
+			return errInvalidResponse
 		}
 		return nil
 	}
 }
 
-func (t *RaftTransport) handleAppendEntries(o []byte, args [][]byte) ([]byte, error) {
+func (t *RESPTransport) handleAppendEntries(o []byte, args [][]byte) ([]byte, error) {
 	if len(args) != 3 {
 		return redcon.AppendError(o, "ERR "+errInvalidNumberOfArgs.Error()), errInvalidNumberOfArgs
 	}
@@ -284,7 +306,7 @@ func (t *RaftTransport) handleAppendEntries(o []byte, args [][]byte) ([]byte, er
 }
 
 // RequestVote implements the Transport interface.
-func (t *RaftTransport) RequestVote(id raft.ServerID, target raft.ServerAddress, args *raft.RequestVoteRequest, resp *raft.RequestVoteResponse) error {
+func (t *RESPTransport) RequestVote(id raft.ServerID, target raft.ServerAddress, args *raft.RequestVoteRequest, resp *raft.RequestVoteResponse) error {
 	conn, err := t.getConn(string(target))
 	if err != nil {
 		return err
@@ -292,7 +314,7 @@ func (t *RaftTransport) RequestVote(id raft.ServerID, target raft.ServerAddress,
 	defer conn.Close()
 
 	data, _ := json.Marshal(args)
-	reply, err := conn.Do("RAFTVOTE", t.id, data)
+	reply, err := conn.Do(raftVoteName, t.id, data)
 	//val, _, err := Do(string(target), nil, []byte("RAFTVOTE"), data)
 	if err != nil {
 		return err
@@ -313,7 +335,7 @@ func (t *RaftTransport) RequestVote(id raft.ServerID, target raft.ServerAddress,
 	return nil
 }
 
-func (t *RaftTransport) handleRequestVote(o []byte, args [][]byte) ([]byte, error) {
+func (t *RESPTransport) handleRequestVote(o []byte, args [][]byte) ([]byte, error) {
 	if len(args) != 3 {
 		return redcon.AppendError(o, "ERR "+errInvalidNumberOfArgs.Error()), errInvalidNumberOfArgs
 	}
@@ -339,7 +361,7 @@ func (t *RaftTransport) handleRequestVote(o []byte, args [][]byte) ([]byte, erro
 }
 
 // InstallSnapshot implements the Transport interface.
-func (t *RaftTransport) InstallSnapshot(
+func (t *RESPTransport) InstallSnapshot(
 	id raft.ServerID, target raft.ServerAddress, args *raft.InstallSnapshotRequest, resp *raft.InstallSnapshotResponse, data io.Reader,
 ) error {
 	// Use a dedicated connection for snapshots. This operation happens very infrequently, but when it does
@@ -355,8 +377,8 @@ func (t *RaftTransport) InstallSnapshot(
 	if err != nil {
 		return err
 	}
-	// send RAFTINSTALL {args}
-	if _, err := conn.Write(buildCommand(nil, []byte("RAFTINSTALL"), rdata)); err != nil {
+	// send RAFTINSTALL {shardID} {args}
+	if _, err := conn.Write(buildCommand(nil, raftInstall, []byte(fmt.Sprintf("%d", t.id)), rdata)); err != nil {
 		return err
 	}
 	// receive +OK
@@ -374,7 +396,7 @@ func (t *RaftTransport) InstallSnapshot(
 		n, ferr := data.Read(buf)
 		if n > 0 {
 			// send CHUNK data
-			cmd = buildCommand(cmd, []byte("chunk"), buf[:n])
+			cmd = buildCommand(cmd, raftChunk, buf[:n])
 			if _, err := conn.Write(cmd); err != nil {
 				return err
 			}
@@ -397,7 +419,7 @@ func (t *RaftTransport) InstallSnapshot(
 		}
 	}
 	// send DONE
-	if _, err := conn.Write(buildCommand(nil, []byte("done"))); err != nil {
+	if _, err := conn.Write(buildCommand(nil, raftDone)); err != nil {
 		return err
 	}
 	// receive ${resp}
@@ -411,86 +433,176 @@ func (t *RaftTransport) InstallSnapshot(
 	return nil
 }
 
-func (t *RaftTransport) HandleInstallSnapshotFn(arg []byte) func(c net.Conn) {
-	_arg := make([]byte, len(arg))
-	copy(_arg, arg)
-	return func(c net.Conn) {
-		t.handleInstallSnapshot(redcon.NewDetachedConn(c), _arg)
-	}
+type snapshotHandler struct {
+	transport *RESPTransport
+	time time.Time
+	reader *io.PipeReader
+	writer *io.PipeWriter
+	handler evred.Handler
+	downstream uint64
 }
 
-func (t *RaftTransport) handleInstallSnapshot(conn redcon.DetachedConn, arg []byte) {
-	err := func() error {
-		var rpc raft.RPC
-		rpc.Command = &raft.InstallSnapshotRequest{}
-		if err := json.Unmarshal(arg, &rpc.Command); err != nil {
-			return err
+func (s *snapshotHandler) ShardID(key string) int {
+	return 0
+}
+
+func (s *snapshotHandler) Commit(ctx *evred.CommandContext) {
+
+}
+
+func (s *snapshotHandler) Parse(ctx *evred.CommandContext) evred.Command {
+	args := ctx.Args
+	conn := ctx.Conn
+	packet := ctx.Packet
+
+	switch strings.ToUpper(string(args[0])) {
+	default:
+		s.reader.CloseWithError(errInvalidRequest)
+		s.writer.CloseWithError(errInvalidRequest)
+		conn.Close()
+		return evred.ERR(fmt.Sprintf("ERR install snapshot mode only supports '%s' and '%s'", raftChunkName, raftDoneName))
+	case raftChunkName:
+		s.downstream += uint64(len(packet))
+
+		if len(args) != 2 {
+			s.reader.CloseWithError(errInvalidNumberOfArgs)
+			s.writer.CloseWithError(errInvalidNumberOfArgs)
+			conn.Close()
+			return evred.ERR("ERR invalid number of args")
 		}
-		conn.WriteString("OK")
-		if err := conn.Flush(); err != nil {
-			return err
+		if _, err := s.writer.Write(args[1]); err != nil {
+			s.reader.CloseWithError(err)
+			s.writer.CloseWithError(err)
+			conn.Close()
+			return evred.ERR(fmt.Sprintf("ERR writer error '%s'", err.Error()))
 		}
-		rd, wr := io.Pipe()
-		go func() {
-			err := func() error {
-				var i int
-				for {
-					cmd, err := conn.ReadCommand()
-					if err != nil {
-						return err
-					}
-					switch strings.ToUpper(string(cmd.Args[0])) {
-					default:
-						return errInvalidCommand
-					case "CHUNK":
-						if len(cmd.Args) != 2 {
-							return errInvalidNumberOfArgs
-						}
-						if _, err := wr.Write(cmd.Args[1]); err != nil {
-							return err
-						}
-						conn.WriteString("OK")
-						if err := conn.Flush(); err != nil {
-							return err
-						}
-						i++
-					case "DONE":
-						return nil
-					}
-				}
-			}()
-			if err != nil {
-				wr.CloseWithError(err)
-			} else {
-				wr.Close()
-			}
-		}()
-		rpc.Reader = rd
-		respChan := make(chan raft.RPCResponse)
-		rpc.RespChan = respChan
-		t.consumer <- rpc
-		resp := <-respChan
-		if resp.Error != nil {
-			return resp.Error
-		}
-		data, err := json.Marshal(resp.Response)
-		if err != nil {
-			return err
-		}
-		conn.WriteBulk(data)
-		if err := conn.Flush(); err != nil {
-			return err
-		}
-		return nil
-	}()
+		return evred.OK()
+	case raftDoneName:
+		s.writer.Close()
+		s.reader.Close()
+		return evred.OK()
+	}
+	return nil
+}
+
+func (t *RESPTransport) HandleInstallSnapshot(conn *evred.Conn, arg []byte) evred.Command {
+	var rpc raft.RPC
+	rpc.Command = &raft.InstallSnapshotRequest{}
+	if err := json.Unmarshal(arg, &rpc.Command); err != nil {
+		return evred.ERROR(err)
+	}
+
+	// Create new pipe
+	rd, wr := io.Pipe()
+
+	// Set rpc reader
+	rpc.Reader = rd
+	respChan := make(chan raft.RPCResponse)
+	rpc.RespChan = respChan
+
+	// Send to transport consumer
+	t.consumer <- rpc
+
+	// Wait for response
+	resp := <-respChan
+	if resp.Error != nil {
+		rd.Close()
+		wr.Close()
+		return evred.ERROR(resp.Error)
+	}
+	// Marshal response
+	data, err := json.Marshal(resp.Response)
 	if err != nil {
-		t.Logger.Warn().Msgf("handle install snapshot failed: %v", err)
-	} else {
-		t.Logger.Info().Msg("handle install snapshot completed")
+		rd.Close()
+		wr.Close()
+		return evred.ERROR(err)
 	}
+
+	handler := &snapshotHandler{
+		transport: t,
+		time: time.Now(),
+		reader: rd,
+		writer: wr,
+	}
+	handler.handler = conn.SetHandler(handler)
+
+	out := redcon.AppendOK(nil)
+	out = redcon.AppendBulk(out, data)
+	return evred.RAW(out)
 }
 
-//func (t *RaftTransport) handle(conn redcon.Conn, cmd redcon.Command) {
+//func (t *RESPTransport) handleInstallSnapshot(conn redcon.DetachedConn, arg []byte) {
+//	err := func() error {
+//		var rpc raft.RPC
+//		rpc.Command = &raft.InstallSnapshotRequest{}
+//		if err := json.Unmarshal(arg, &rpc.Command); err != nil {
+//			return err
+//		}
+//		conn.WriteString("OK")
+//		if err := conn.Flush(); err != nil {
+//			return err
+//		}
+//		rd, wr := io.Pipe()
+//		go func() {
+//			err := func() error {
+//				var i int
+//				for {
+//					cmd, err := conn.ReadCommand()
+//					if err != nil {
+//						return err
+//					}
+//					switch strings.ToUpper(string(cmd.Args[0])) {
+//					default:
+//						return errInvalidCommand
+//					case raftChunkName:
+//						if len(cmd.Args) != 2 {
+//							return errInvalidNumberOfArgs
+//						}
+//						if _, err := wr.Write(cmd.Args[1]); err != nil {
+//							return err
+//						}
+//						conn.WriteString("OK")
+//						if err := conn.Flush(); err != nil {
+//							return err
+//						}
+//						i++
+//					case raftDoneName:
+//						return nil
+//					}
+//				}
+//			}()
+//			if err != nil {
+//				wr.CloseWithError(err)
+//			} else {
+//				wr.Close()
+//			}
+//		}()
+//		rpc.Reader = rd
+//		respChan := make(chan raft.RPCResponse)
+//		rpc.RespChan = respChan
+//		t.consumer <- rpc
+//		resp := <-respChan
+//		if resp.Error != nil {
+//			return resp.Error
+//		}
+//		data, err := json.Marshal(resp.Response)
+//		if err != nil {
+//			return err
+//		}
+//		conn.WriteBulk(data)
+//		if err := conn.Flush(); err != nil {
+//			return err
+//		}
+//		return nil
+//	}()
+//	if err != nil {
+//		t.Logger.Warn().Msgf("handle install snapshot failed: %v", err)
+//	} else {
+//		t.Logger.Info().Msg("handle install snapshot completed")
+//	}
+//}
+
+//func (t *RESPTransport) handle(conn redcon.Conn, cmd redcon.Command) {
 //	var err error
 //	var res []byte
 //	switch strings.ToLower(string(cmd.Args[0])) {
@@ -530,19 +642,19 @@ func (t *RaftTransport) handleInstallSnapshot(conn redcon.DetachedConn, arg []by
 //}
 
 // Consumer implements the Transport interface.
-func (t *RaftTransport) Consumer() <-chan raft.RPC { return t.consumer }
+func (t *RESPTransport) Consumer() <-chan raft.RPC { return t.consumer }
 
 // LocalAddr implements the Transport interface.
-func (t *RaftTransport) LocalAddr() raft.ServerAddress { return t.addr }
+func (t *RESPTransport) LocalAddr() raft.ServerAddress { return t.addr }
 
 // EncodePeer implements the Transport interface.
-func (t *RaftTransport) EncodePeer(id raft.ServerID, peer raft.ServerAddress) []byte { return []byte(peer) }
+func (t *RESPTransport) EncodePeer(id raft.ServerID, peer raft.ServerAddress) []byte { return []byte(peer) }
 
 // DecodePeer implements the Transport interface.
-func (t *RaftTransport) DecodePeer(peer []byte) raft.ServerAddress { return raft.ServerAddress(peer) }
+func (t *RESPTransport) DecodePeer(peer []byte) raft.ServerAddress { return raft.ServerAddress(peer) }
 
 // SetHeartbeatHandler implements the Transport interface.
-func (t *RaftTransport) SetHeartbeatHandler(cb func(rpc raft.RPC)) {}
+func (t *RESPTransport) SetHeartbeatHandler(cb func(rpc raft.RPC)) {}
 
 // Do is a helper function that makes a very simple remote request with
 // the specified Cmd.

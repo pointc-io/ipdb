@@ -11,8 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -24,6 +22,9 @@ import (
 	"github.com/pointc-io/ipdb/service"
 	"github.com/pointc-io/ipdb"
 	"log"
+	"bytes"
+	"github.com/rs/zerolog"
+	"github.com/pointc-io/ipdb/redcon/ev"
 )
 
 const (
@@ -65,12 +66,15 @@ type Shard struct {
 
 	raft      *raft.Raft // The consensus mechanism
 	snapshots raft.SnapshotStore
-	transport *RaftTransport
+	transport *RESPTransport
 	trans     raft.Transport
 	store     bigStore
 	db        *buntdb.DB
 
 	applier Applier
+
+	observerCh chan raft.Observation
+	observer   *raft.Observer
 }
 
 // bigStore represents a raft store that conforms to
@@ -105,6 +109,7 @@ func NewShard(id int, enableSingle bool, path, localID string, applier Applier) 
 		enableSingle: enableSingle,
 		applier:      applier,
 		m:            make(map[string]string),
+		observerCh:   make(chan raft.Observation),
 	}
 	var name string
 	if s.id < 0 {
@@ -124,7 +129,10 @@ func (s *Shard) OnStart() error {
 	// Setup Raft configuration.
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(s.localID)
-	config.Logger = log.New(s.Logger, "", 0)
+	raftLogger := &raftLoggerWriter{
+		logger: s.Logger,
+	}
+	config.Logger = log.New(raftLogger, "", 0)
 	var err error
 
 	// Open database
@@ -167,7 +175,7 @@ func (s *Shard) OnStart() error {
 		s.snapshots = raft.NewInmemSnapshotStore()
 	} else {
 		// Create the snapshot store. This allows the Raft to truncate the log.
-		s.snapshots, err = raft.NewFileSnapshotStore(s.Path, retainSnapshotCount, os.Stderr)
+		s.snapshots, err = raft.NewFileSnapshotStore(s.Path, retainSnapshotCount, raftLogger)
 		if err != nil {
 			s.transport.Stop()
 			s.Logger.Error().Err(err).Msg("file snapshot store failed")
@@ -192,7 +200,7 @@ func (s *Shard) OnStart() error {
 	s.store, err = raftfastlog.NewFastLogStore(
 		logpath,
 		raftfastlog.Medium,
-		butterd.Logger.With().Str("logger", logname).Logger(),
+		s.Logger.With().Str("component", logname).Logger(),
 	)
 	if err != nil {
 		s.transport.Stop()
@@ -214,6 +222,12 @@ func (s *Shard) OnStart() error {
 		s.Logger.Error().Err(err).Msg("new raft failed")
 		return fmt.Errorf("new raft: %s", err)
 	}
+
+	s.observer = raft.NewObserver(s.observerCh, false, func(o *raft.Observation) bool {
+		return true
+	})
+	go s.runObserver()
+	s.raft.RegisterObserver(s.observer)
 
 	if bootstrap {
 		//config.StartAsLeader = true
@@ -252,6 +266,94 @@ func (s *Shard) OnStop() {
 	if err := s.db.Close(); err != nil {
 		s.Logger.Error().Err(err).Msg("db close error")
 	}
+
+	close(s.observerCh)
+}
+
+type raftLoggerWriter struct {
+	logger zerolog.Logger
+}
+
+func (w *raftLoggerWriter) Write(b []byte) (int, error) {
+	l := len(b)
+	if l > 4 {
+		if b[0] == '[' {
+			idx := bytes.IndexByte(b, ']')
+			if idx > 0 {
+				//level := zerolog.InfoLevel
+				level := string(b[1:idx])
+
+				b = b[idx+1:]
+				name := "raft"
+				idx = bytes.IndexByte(b, ':')
+
+				if idx > 0 {
+					name = string(bytes.TrimSpace(b[:idx]))
+
+					b = b[idx+1:]
+					if len(b) > 0 {
+						if b[0] == ' ' {
+							b = b[1:]
+						}
+					}
+				}
+
+				ll := len(b)
+				if ll >= 2 {
+					if b[ll-1] == '\n' {
+						if b[ll-2] == '\r' {
+							b = b[:ll-2]
+						} else {
+							b = b[:ll-1]
+						}
+					}
+				}
+
+				msg := string(b)
+				switch level {
+				case "WARN":
+					w.logger.Warn().Str("component", name).Msg(msg)
+				case "DEBU":
+					w.logger.Debug().Str("component", name).Msg(msg)
+				case "DEBUG":
+					w.logger.Debug().Str("component", name).Msg(msg)
+				case "INFO":
+					w.logger.Info().Str("component", name).Msg(msg)
+				case "ERR":
+					w.logger.Error().Str("component", name).Msg(msg)
+				case "ERRO":
+					w.logger.Error().Str("component", name).Msg(msg)
+				case "ERROR":
+					w.logger.Error().Str("component", name).Msg(msg)
+
+				default:
+					w.logger.Info().Str("component", name).Msg(msg)
+				}
+			}
+		} else {
+			w.logger.Info().Str("component", "raft").Msg(string(b))
+		}
+	}
+	return l, nil
+}
+
+func (s *Shard) runObserver() {
+	for {
+		select {
+		case observation, ok := <-s.observerCh:
+			if !ok {
+				return
+			}
+			str := ""
+			data, err := json.Marshal(observation.Data)
+			if err != nil {
+				str = string(data)
+			} else {
+				str = fmt.Sprintf("%s", data)
+			}
+			s.Logger.Debug().Msgf("raft observation: %s", str)
+		}
+	}
 }
 
 func (s *Shard) Snapshot() error {
@@ -274,19 +376,19 @@ func (s *Shard) ShrinkLog() error {
 	return ErrLogNotShrinkable
 }
 
-// Only for RaftTransport RAFTAPPEND
+// Only for RESPTransport RAFTAPPEND
 func (s *Shard) AppendEntries(o []byte, args [][]byte) ([]byte, error) {
 	return s.transport.handleAppendEntries(o, args)
 }
 
-// Only for RaftTransport RAFTVOTE
+// Only for RESPTransport RAFTVOTE
 func (s *Shard) RequestVote(o []byte, args [][]byte) ([]byte, error) {
 	return s.transport.handleRequestVote(o, args)
 }
 
-// Only for RaftTransport RAFTINSTALL
-func (s *Shard) HandleInstallSnapshot(arg []byte) func(c net.Conn) {
-	return s.transport.HandleInstallSnapshotFn(arg)
+// Only for RESPTransport RAFTINSTALL
+func (s *Shard) HandleInstallSnapshot(conn *evred.Conn, arg []byte) evred.Command {
+	return s.transport.HandleInstallSnapshot(conn, arg)
 }
 
 // "SHRINK" client command.

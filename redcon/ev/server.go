@@ -14,7 +14,7 @@ import (
 	"github.com/pointc-io/ipdb/evio"
 	"github.com/pointc-io/ipdb/service"
 	"strings"
-	"github.com/hashicorp/raft"
+	"github.com/pointc-io/ipdb/db/buntdb"
 )
 
 var notImplementedHandler = func(out []byte, action evio.Action, conn *Conn, packet []byte, args [][]byte) ([]byte, evio.Action) {
@@ -25,12 +25,19 @@ var notImplementedHandler = func(out []byte, action evio.Action, conn *Conn, pac
 type Handler interface {
 	ShardID(key string) int
 
-	Parse(conn *Conn, packet []byte, args [][]byte) Command
+	Parse(ctx *CommandContext) Command
 
 	//NextCommand(out []byte, action evio.Action, conn *Conn, packet []byte, args [][]byte) ([]byte, evio.Action)
 
-	Commit(conn *Conn, shard int, commitlog []byte) (raft.ApplyFuture, error)
+	Commit(ctx *CommandContext)
 }
+
+type ApplyMode int
+
+const (
+	Medium ApplyMode = iota
+	High   ApplyMode = 1
+)
 
 type CommitLog interface {
 }
@@ -207,10 +214,12 @@ func (e *EvLoop) serve() {
 	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
 		// Create new Conn
 		c := &Conn{
-			id: id,
-			ev: e,
+			id:      id,
+			ev:      e,
+			handler: s.handler,
 		}
 		conns[id] = c
+		c.Consistency = Medium
 		return
 	}
 	events.Tick = func() (delay time.Duration, action evio.Action) {
@@ -243,7 +252,7 @@ func (e *EvLoop) serve() {
 			return
 		}
 		delete(conns, id)
-		c.onDetached(conn)
+		_ = c
 		return
 	}
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
@@ -271,71 +280,30 @@ func (e *EvLoop) serve() {
 			return
 		}
 
+		c.statsTotalUpstream += uint64(len(in))
+
 		// A single buffer is reused at the eventloop level.
 		// If we get partial commands then we need to copy to
 		// an allocated buffer at the connection level.
 		// Zero copy if possible strategy.
 		data := c.begin(in)
 
-		var packet []byte
+		//var packet []byte
 		var complete bool
 		var err error
-		var args [][]byte
+		//var args [][]byte
 		var cmd Command
 		var cmdCount = 0
 
-		var commitMap map[int]*struct {
-			cmds []Command
-			buf  []byte
-		}
-
-		flush := func() {
-			for shardID, group := range commitMap {
-				l := len(group.cmds)
-				if l == 0 {
-					continue
-				}
-
-				// Commit
-				future, err := s.handler.Commit(c, shardID, group.buf)
-
-				if err != nil {
-					for i := 0; i < l; i++ {
-						out = redcon.AppendError(out, "ERR "+err.Error())
-					}
-				} else if err = future.Error(); err != nil {
-					for i := 0; i < l; i++ {
-						out = redcon.AppendError(out, "ERR "+err.Error())
-					}
-				} else if resp := future.Response(); resp != nil {
-					if buf, ok := resp.([]byte); ok {
-						out = append(out, buf...)
-					} else {
-						switch t := resp.(type) {
-						case string:
-							out = redcon.AppendBulkString(out, t)
-						default:
-							for i := 0; i < l; i++ {
-								out = redcon.AppendError(out, fmt.Sprintf("ERR apply return type %v", t))
-							}
-						}
-					}
-				} else {
-					for i := 0; i < l; i++ {
-						out = redcon.AppendOK(out)
-					}
-				}
-
-				delete(commitMap, shardID)
-			}
+		ctx := &CommandContext{
+			Conn: c,
+			Out:  out,
 		}
 
 		for action == evio.None {
-			//if cmd != nil {
-			//	commands = append(commands, cmd)
-			//}
 			// Read next command.
-			packet, complete, args, _, data, err = redcon.ReadNextCommand2(data, args[:0])
+			//packet, complete, args, _, data, err = redcon.ReadNextCommand2(data, args[:0])
+			ctx.Packet, complete, ctx.Args, _, data, err = redcon.ReadNextCommand2(data, ctx.Args[:0])
 
 			if err != nil {
 				action = evio.Close
@@ -349,87 +317,35 @@ func (e *EvLoop) serve() {
 				break
 			}
 
-			if len(args) > 0 {
-				// Parse Command
-				cmd = s.handler.Parse(c, packet, args)
+			numArgs := len(ctx.Args)
+			if numArgs > 0 {
+				c.statsTotalCommands++
 				cmdCount++
 
-				if cmd == nil {
-					cmd = ERR(fmt.Sprintf("ERR command '%s' not found", strings.ToUpper(string(args[0]))))
+				ctx.Name = strings.ToUpper(string(ctx.Args[0]))
+
+				if numArgs > 1 {
+					ctx.Key = string(ctx.Args[1])
+					//ctx.Key = *(*string)(unsafe.Pointer(&ctx.Args[1]))
+				} else {
+					ctx.Key = ""
 				}
 
-				//commands = append(commands, cmd)
+				// Parse Command
+				cmd = c.handler.Parse(ctx)
+
+				if cmd == nil {
+					cmd = ERR(fmt.Sprintf("ERR command '%s' not found", ctx.Name))
+				}
 
 				if cmd.IsWrite() {
-					key := string(args[1])
-					shardID := s.handler.ShardID(key)
-
-					b := make([]byte, len(packet))
-					copy(b, packet)
-
-					// Add to commit log.
-					if commitMap == nil {
-						commitMap = make(map[int]*struct {
-							cmds []Command
-							buf  []byte
-						})
-						commitMap[shardID] = &struct {
-							cmds []Command
-							buf  []byte
-						}{
-							cmds: []Command{cmd},
-							buf:  b,
-						}
-					} else {
-						group, ok := commitMap[shardID]
-						if !ok {
-							commitMap[shardID] = &struct {
-								cmds []Command
-								buf  []byte
-							}{
-								cmds: []Command{cmd},
-								buf:  b,
-							}
-						} else {
-							group.cmds = append(group.cmds, cmd)
-							group.buf = append(group.buf, b...)
-						}
-					}
-
-					// Commit
-					//future, err := s.handler.Commit(c, shardID, packet)
-					//
-					//if err != nil {
-					//	out = redcon.AppendError(out, "ERR "+err.Error())
-					//} else if err = future.Error(); err != nil {
-					//	out = redcon.AppendError(out, "ERR "+err.Error())
-					//} else if resp := future.Response(); resp != nil {
-					//	if buf, ok := resp.([]byte); ok {
-					//		out = append(out, buf...)
-					//	} else {
-					//		switch t := resp.(type) {
-					//		case string:
-					//			out = redcon.AppendBulkString(out, t)
-					//		default:
-					//			out = redcon.AppendError(out, fmt.Sprintf("ERR apply return type %v", t))
-					//		}
-					//	}
-					//} else {
-					//	out = redcon.AppendOK(out)
-					//}
-
-					//_ = future
-					//_ = err
-					//
-					//out = redcon.AppendOK(out)
+					ctx.AddChange(cmd, ctx.Packet)
 				} else {
 					// Commit if necessary
-					if len(commitMap) > 0 {
-						flush()
-					}
+					ctx.Commit()
 
 					// Append directly.
-					out = cmd.Invoke(out)
+					ctx.Out = cmd.Invoke(ctx)
 				}
 
 				//if !dispatched {
@@ -454,28 +370,27 @@ func (e *EvLoop) serve() {
 				//	// Append onto connection backlog
 				//	c.backlog = append(c.backlog, cmd)
 				//}
+				ctx.Index++
 			}
 		}
 
 		// Copy partial Cmd data if any.
 		c.end(data)
 
+		c.statsTotalDownstream += uint64(len(out))
+
 		if action == evio.Close {
 			return
 		}
 
 		if cmd == nil {
-			return out, c.evaction
+			return ctx.Out, c.evaction
 		}
 
 		// Flush commit buffer
-		if len(commitMap) > 0 {
-			flush()
-		}
+		ctx.Commit()
 
-		//e.Logger.Debug().Msgf("%d commands", cmdCount)
-
-		return out, c.evaction
+		return ctx.Out, c.evaction
 	}
 
 	err := evio.ServeListener(events, false, s.listener)
@@ -487,4 +402,84 @@ func (e *EvLoop) serve() {
 
 func (e *EvLoop) Wake(id int) {
 	e.Ev.Wake(id)
+}
+
+type CommandContext struct {
+	Conn    *Conn // Connection
+	Out     []byte
+	Index   int // Index of command
+	Name    string
+	Key     string // Key if it exists
+	ShardID int    // Shard ID if calculated
+	Packet  []byte
+	Args    [][]byte
+	Tx      *buntdb.Tx
+	DB      *buntdb.DB
+
+	Changes map[int]*ChangeSet
+}
+
+type ChangeSet struct {
+	Cmds []Command
+	Data []byte
+}
+
+func (c *CommandContext) AppendOK() []byte {
+	return redcon.AppendOK(c.Out)
+}
+
+func (c *CommandContext) AppendNull() []byte {
+	return redcon.AppendNull(c.Out)
+}
+
+func (c *CommandContext) AppendError(msg string) []byte {
+	return redcon.AppendError(c.Out, msg)
+}
+
+func (c *CommandContext) AppendBulkString(bulk string) []byte {
+	return redcon.AppendBulkString(c.Out, bulk)
+}
+
+func (c *CommandContext) ApppendBulk(bulk []byte) []byte {
+	return redcon.AppendBulk(c.Out, bulk)
+}
+
+func (c *CommandContext) ApppendInt(val int) []byte {
+	return redcon.AppendInt(c.Out, int64(val))
+}
+
+func (c *CommandContext) ApppendInt64(val int64) []byte {
+	return redcon.AppendInt(c.Out, val)
+}
+
+func (c *CommandContext) Commit() {
+	if c.HasChanges() {
+		c.Conn.handler.Commit(c)
+	}
+}
+
+func (c *CommandContext) HasChanges() bool {
+	return len(c.Changes) > 0
+}
+
+func (c *CommandContext) AddChange(cmd Command, data []byte) {
+	if c.Changes == nil {
+		c.Changes = map[int]*ChangeSet{
+			c.ShardID: {
+				Cmds: []Command{cmd},
+				Data: data,
+			},
+		}
+	} else {
+		set, ok := c.Changes[c.ShardID]
+		if !ok {
+			c.Changes[c.ShardID] = &ChangeSet{
+				Cmds: []Command{cmd},
+				Data: c.Packet,
+			}
+		} else {
+			set.Cmds = append(set.Cmds, cmd)
+			set.Data = append(set.Data, c.Packet...)
+		}
+	}
 }

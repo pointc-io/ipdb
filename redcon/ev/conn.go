@@ -2,12 +2,10 @@ package evred
 
 import (
 	"sync"
-	"net"
 	"github.com/pointc-io/ipdb/evio"
 )
 
 var maxCommandBacklog = 2048
-
 
 type Conn struct {
 	id       int
@@ -21,7 +19,6 @@ type Conn struct {
 	out   []byte // Out buffer
 	multi bool
 	flush bool
-	//outb []byte
 
 	backlog        []Command
 	backlogOverage int
@@ -29,11 +26,15 @@ type Conn struct {
 
 	multis []Command
 
-	//commitlog []Command
-	//commitbuf []byte
+	handler Handler
 
-	detached   net.Conn
-	detachedFn func(conn net.Conn)
+	statsTotalCommands   uint64
+	statsTotalUpstream   uint64
+	statsTotalDownstream uint64
+
+	Consistency ApplyMode
+
+	ctx *CommandContext
 }
 
 // Incoming REDIS protocol Cmd
@@ -62,6 +63,16 @@ type Conn struct {
 //	return
 //}
 
+func (c *Conn) Close() error {
+	c.evaction = evio.Close
+	return nil
+}
+
+func (c *Conn) SetHandler(handler Handler) Handler {
+	prev := c.handler
+	c.handler = handler
+	return prev
+}
 
 func (c *Conn) Multi() {
 	if c.multi {
@@ -79,28 +90,28 @@ func (c *Conn) dispatch(cmd Command) {
 }
 
 func (c *Conn) Run() {
-	// Was the job already canceled?
-	c.mu.Lock()
-	if c.dispatched == nil {
-		c.mu.Unlock()
-		return
-	}
-	c.mu.Unlock()
-
-	l := len(c.out)
-	// Run job.
-	c.out = c.dispatched.Background(c.out)
-
-	if len(c.out) == l {
-		c.out = ERR("Command not implemented").Invoke(c.out)
-	}
-
-	c.mu.Lock()
-	c.dispatched = nil
-	c.mu.Unlock()
-
-	// Notify event loop of our write.
-	c.wake()
+	//// Was the job already canceled?
+	//c.mu.Lock()
+	//if c.dispatched == nil {
+	//	c.mu.Unlock()
+	//	return
+	//}
+	//c.mu.Unlock()
+	//
+	//l := len(c.out)
+	//// Run job.
+	//c.out = c.dispatched.Invoke(c.ctx)
+	//
+	//if len(c.out) == l {
+	//	c.out = ERR("Command not implemented").Invoke(c.out)
+	//}
+	//
+	//c.mu.Lock()
+	//c.dispatched = nil
+	//c.mu.Unlock()
+	//
+	//// Notify event loop of our write.
+	//c.wake()
 }
 
 // Inform the event loop to close this connection.
@@ -139,7 +150,7 @@ func (c *Conn) woke() (out []byte, action evio.Action) {
 	// Empty backlog.
 	for i, cmd := range c.backlog {
 		before := len(out)
-		out = cmd.Invoke(out)
+		out = cmd.Invoke(nil)
 
 		// Does it need to be dispatched?
 		if len(out) == before {
@@ -194,24 +205,4 @@ func (c *Conn) end(data []byte) {
 	//	c.outb = c.out
 	//	c.out = nil
 	//}
-}
-
-func (c *Conn) onDetached(conn net.Conn) {
-	c.mu.Lock()
-	c.detached = conn
-	fn := c.detachedFn
-	c.mu.Unlock()
-	if fn != nil {
-		fn(conn)
-	}
-}
-
-func (c *Conn) Detach(fn func(conn net.Conn)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.detached == nil {
-		//c.detached = c.ev.Ev.
-		c.evaction = evio.Detach
-		c.detachedFn = fn
-	}
 }
