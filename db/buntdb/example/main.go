@@ -4,9 +4,22 @@ import (
 	"fmt"
 
 	"github.com/tidwall/buntdb"
+	"encoding/binary"
+	"unsafe"
 )
 
 func main() {
+	b := make([]byte, 4)
+	binary.LittleEndian.PutUint32(b, 120)
+
+	b2 := make([]byte, 4)
+	binary.LittleEndian.PutUint32(b2, 65000000)
+
+	i := *(*int32)(unsafe.Pointer(&b[0]))
+	fmt.Println(i)
+	fmt.Println(b)
+	fmt.Println(b2)
+
 	db, _ := buntdb.Open(":memory:")
 	db.Update(func(tx *buntdb.Tx) error {
 		tx.CreateIndex("last_name", "p:*", buntdb.IndexJSON("name.last"))

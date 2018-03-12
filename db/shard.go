@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
 	"sync"
 	"time"
 	"errors"
@@ -25,6 +24,7 @@ import (
 	"bytes"
 	"github.com/rs/zerolog"
 	"github.com/pointc-io/ipdb/redcon/ev"
+	"strings"
 )
 
 const (
@@ -140,7 +140,8 @@ func (s *Shard) OnStart() error {
 	if s.Path == ":memory:" {
 		dbpath = ":memory:"
 	} else {
-		dbpath = filepath.Join(s.Path, "data.db")
+		dbpath = ":memory:"
+		//dbpath = filepath.Join(s.Path, "data.db")
 	}
 	s.db, err = buntdb.Open(dbpath)
 	if err != nil {
@@ -188,7 +189,8 @@ func (s *Shard) OnStart() error {
 	if s.Path == ":memory:" {
 		logpath = ":memory:"
 	} else {
-		logpath = filepath.Join(s.Path, "raft.db")
+		logpath = ":memory:"
+		//logpath = filepath.Join(s.Path, "raft.db")
 	}
 	var logname string
 	if s.id < 0 {
@@ -199,7 +201,7 @@ func (s *Shard) OnStart() error {
 	// Create the log store and stable store.
 	s.store, err = raftfastlog.NewFastLogStore(
 		logpath,
-		raftfastlog.Medium,
+		raftfastlog.Low,
 		s.Logger.With().Str("component", logname).Logger(),
 	)
 	if err != nil {
@@ -274,65 +276,50 @@ type raftLoggerWriter struct {
 	logger zerolog.Logger
 }
 
-func (w *raftLoggerWriter) Write(b []byte) (int, error) {
-	l := len(b)
-	if l > 4 {
-		if b[0] == '[' {
-			idx := bytes.IndexByte(b, ']')
+func (w *raftLoggerWriter) Write(buf []byte) (int, error) {
+	l := len(buf)
+	b := buf
+	lidx := bytes.IndexByte(b, '[')
+	if lidx > -1 {
+		b = b[lidx+1:]
+		idx := bytes.IndexByte(b, ']')
+		if idx > 0 {
+			level := string(b[0:idx])
+
+			b = b[idx+1:]
+			name := "raft"
+			idx = bytes.IndexByte(b, ':')
+
 			if idx > 0 {
-				//level := zerolog.InfoLevel
-				level := string(b[1:idx])
-
+				name = string(bytes.TrimSpace(b[:idx]))
 				b = b[idx+1:]
-				name := "raft"
-				idx = bytes.IndexByte(b, ':')
+			}
 
-				if idx > 0 {
-					name = string(bytes.TrimSpace(b[:idx]))
+			msg := strings.TrimSpace(string(b))
+			switch level {
+			case "WARN":
+				w.logger.Warn().Str("component", name).Msg(msg)
+			case "DEBU":
+				w.logger.Debug().Str("component", name).Msg(msg)
+			case "DEBUG":
+				w.logger.Debug().Str("component", name).Msg(msg)
+			case "INFO":
+				w.logger.Info().Str("component", name).Msg(msg)
+			case "ERR":
+				w.logger.Error().Str("component", name).Msg(msg)
+			case "ERRO":
+				w.logger.Error().Str("component", name).Msg(msg)
+			case "ERROR":
+				w.logger.Error().Str("component", name).Msg(msg)
 
-					b = b[idx+1:]
-					if len(b) > 0 {
-						if b[0] == ' ' {
-							b = b[1:]
-						}
-					}
-				}
-
-				ll := len(b)
-				if ll >= 2 {
-					if b[ll-1] == '\n' {
-						if b[ll-2] == '\r' {
-							b = b[:ll-2]
-						} else {
-							b = b[:ll-1]
-						}
-					}
-				}
-
-				msg := string(b)
-				switch level {
-				case "WARN":
-					w.logger.Warn().Str("component", name).Msg(msg)
-				case "DEBU":
-					w.logger.Debug().Str("component", name).Msg(msg)
-				case "DEBUG":
-					w.logger.Debug().Str("component", name).Msg(msg)
-				case "INFO":
-					w.logger.Info().Str("component", name).Msg(msg)
-				case "ERR":
-					w.logger.Error().Str("component", name).Msg(msg)
-				case "ERRO":
-					w.logger.Error().Str("component", name).Msg(msg)
-				case "ERROR":
-					w.logger.Error().Str("component", name).Msg(msg)
-
-				default:
-					w.logger.Info().Str("component", name).Msg(msg)
-				}
+			default:
+				w.logger.Info().Str("component", name).Msg(msg)
 			}
 		} else {
-			w.logger.Info().Str("component", "raft").Msg(string(b))
+			w.logger.Info().Str("component", "raft").Msg(strings.TrimSpace(string(buf)))
 		}
+	} else {
+		w.logger.Info().Str("component", "raft").Msg(strings.TrimSpace(string(buf)))
 	}
 	return l, nil
 }
@@ -527,55 +514,38 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// Clone the map.
-	o := make(map[string]string)
-	for k, v := range f.m {
-		o[k] = v
-	}
-	return &fsmSnapshot{store: o}, nil
+	return &fsmSnapshot{db: f.db}, nil
 }
 
 // Restore stores the key-value store to a previous state.
 func (f *fsm) Restore(rc io.ReadCloser) error {
-	o := make(map[string]string)
-	if err := json.NewDecoder(rc).Decode(&o); err != nil {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	db, err := buntdb.Open(":memory:")
+	if err != nil {
 		return err
 	}
+	db.Load(rc)
+
+	old := f.db
 
 	// Set the state from the snapshot, no lock required according to
 	// Hashicorp docs.
-	f.m = o
-	return nil
-}
-
-func (f *fsm) applySet(key, value string) interface{} {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.m[key] = value
-	return nil
-}
-
-func (f *fsm) applyDelete(key string) interface{} {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.m, key)
+	f.db = db
+	_ = old
 	return nil
 }
 
 type fsmSnapshot struct {
-	store map[string]string
+	db *buntdb.DB
 }
 
 func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 	err := func() error {
 		// Encode data.
-		b, err := json.Marshal(f.store)
+		err := f.db.Save(sink)
 		if err != nil {
-			return err
-		}
-
-		// Write data to sink.
-		if _, err := sink.Write(b); err != nil {
 			return err
 		}
 

@@ -106,7 +106,7 @@ func ReadNextCommand(packet []byte, argsbuf [][]byte) (
 // 'kind' is the type of command that was read.
 // 'leftover' is any remaining unused bytes which belong to the next command.
 // 'err' is returned when a protocol error was encountered.
-func ReadNextCommand2(packet []byte, argsbuf [][]byte) (
+func ParseNextCommand(packet []byte, argsbuf [][]byte) (
 	command []byte, complete bool, args [][]byte, kind Kind, leftover []byte, err error,
 ) {
 	args = argsbuf[:0]

@@ -28,6 +28,7 @@ var ErrClosed = errors.New("closed")
 var ErrShrinking = errors.New("shrink in progress")
 
 const minShrinkSize = 64 * 1024 * 1024
+//const minShrinkSize = 64 * 1024
 
 const (
 	cmdSet         = '(' // Key+Val

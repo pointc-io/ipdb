@@ -52,25 +52,7 @@ import (
 	"io"
 	"strings"
 	"sync"
-	"bytes"
 )
-
-type TreeItem struct {
-	//Key   int64
-	Key []byte
-	Value []byte
-	//projection Value
-	ctx *ItemCtx
-}
-
-func (item *TreeItem) Less(than Item, ctx interface{}) bool {
-	//return item.Key < than.(*TreeItem).Key
-	return bytes.Compare(item.Key, than.(*TreeItem).Key) == -1
-}
-
-type ItemCtx struct {
-	TTL int
-}
 
 // Item represents a single object in the tree.
 type Item interface {
@@ -101,34 +83,44 @@ var (
 type FreeList struct {
 	mu       sync.Mutex
 	freelist []*node
+	pool *sync.Pool
 }
 
 // NewFreeList creates a new free list.
 // size is the maximum size of the returned free list.
 func NewFreeList(size int) *FreeList {
-	return &FreeList{freelist: make([]*node, 0, size)}
+	return &FreeList{
+		freelist: make([]*node, 0, size),
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return new(node)
+			},
+		},
+		}
 }
 
 func (f *FreeList) newNode() (n *node) {
-	f.mu.Lock()
-	index := len(f.freelist) - 1
-	if index < 0 {
-		f.mu.Unlock()
-		return new(node)
-	}
-	n = f.freelist[index]
-	f.freelist[index] = nil
-	f.freelist = f.freelist[:index]
-	f.mu.Unlock()
+	n = f.pool.Get().(*node)
+	//f.mu.Lock()
+	//index := len(f.freelist) - 1
+	//if index < 0 {
+	//	f.mu.Unlock()
+	//	return new(node)
+	//}
+	//n = f.freelist[index]
+	//f.freelist[index] = nil
+	//f.freelist = f.freelist[:index]
+	//f.mu.Unlock()
 	return
 }
 
 func (f *FreeList) freeNode(n *node) {
-	f.mu.Lock()
-	if len(f.freelist) < cap(f.freelist) {
-		f.freelist = append(f.freelist, n)
-	}
-	f.mu.Unlock()
+	f.pool.Put(n)
+	//f.mu.Lock()
+	//if len(f.freelist) < cap(f.freelist) {
+	//	f.freelist = append(f.freelist, n)
+	//}
+	//f.mu.Unlock()
 }
 
 // ItemIterator allows callers of Ascend* to iterate in-order over portions of

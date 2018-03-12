@@ -27,20 +27,16 @@ type Handler interface {
 
 	Parse(ctx *CommandContext) Command
 
-	//NextCommand(out []byte, action evio.Action, conn *Conn, packet []byte, args [][]byte) ([]byte, evio.Action)
-
 	Commit(ctx *CommandContext)
 }
 
-type ApplyMode int
+type Durability int
 
 const (
-	Medium ApplyMode = iota
-	High   ApplyMode = 1
+	Low    Durability = -1
+	Medium Durability = 0
+	High   Durability = 1
 )
-
-type CommitLog interface {
-}
 
 //
 type Server struct {
@@ -219,7 +215,7 @@ func (e *EvLoop) serve() {
 			handler: s.handler,
 		}
 		conns[id] = c
-		c.Consistency = Medium
+		c.Durability = Medium
 		return
 	}
 	events.Tick = func() (delay time.Duration, action evio.Action) {
@@ -302,8 +298,7 @@ func (e *EvLoop) serve() {
 
 		for action == evio.None {
 			// Read next command.
-			//packet, complete, args, _, data, err = redcon.ReadNextCommand2(data, args[:0])
-			ctx.Packet, complete, ctx.Args, _, data, err = redcon.ReadNextCommand2(data, ctx.Args[:0])
+			ctx.Packet, complete, ctx.Args, _, data, err = redcon.ParseNextCommand(data, ctx.Args[:0])
 
 			if err != nil {
 				action = evio.Close
@@ -348,28 +343,6 @@ func (e *EvLoop) serve() {
 					ctx.Out = cmd.Invoke(ctx)
 				}
 
-				//if !dispatched {
-				//	before := len(out)
-				//	out = cmd.Invoke(out)
-				//
-				//	// Do we need to dispatch on Worker pool?
-				//	if len(out) == before {
-				//		dispatched = true
-				//		c.dispatch(cmd)
-				//	} else {
-				//		commands = append(commands, cmd)
-				//
-				//		if cmd.IsWrite() {
-				//			// Add to commit log.
-				//			c.commitlog = append(c.commitlog, cmd)
-				//			c.commitbuf = cmd.Commit(c.commitbuf, packet)
-				//		} else {
-				//		}
-				//	}
-				//} else {
-				//	// Append onto connection backlog
-				//	c.backlog = append(c.backlog, cmd)
-				//}
 				ctx.Index++
 			}
 		}
@@ -404,17 +377,20 @@ func (e *EvLoop) Wake(id int) {
 	e.Ev.Wake(id)
 }
 
+// Represents a series of pipelined Commands
 type CommandContext struct {
-	Conn    *Conn // Connection
-	Out     []byte
-	Index   int // Index of command
-	Name    string
-	Key     string // Key if it exists
-	ShardID int    // Shard ID if calculated
-	Packet  []byte
-	Args    [][]byte
-	Tx      *buntdb.Tx
-	DB      *buntdb.DB
+	Conn    *Conn    // Connection
+	Out     []byte   // Output buffer to write to connection
+	Index   int      // Index of command
+	ShardID int      // Shard ID if calculated
+	Name    string   // Current command name
+	Key     string   // Key if it exists
+	Packet  []byte   // Raw byte slice of current command
+	Args    [][]byte // Current command args
+
+	// Transactional holders
+	Tx *buntdb.Tx // Tx holder
+	DB *buntdb.DB // DB holder
 
 	Changes map[int]*ChangeSet
 }
@@ -422,6 +398,10 @@ type CommandContext struct {
 type ChangeSet struct {
 	Cmds []Command
 	Data []byte
+}
+
+func (c *CommandContext) Int(index int, or int) int {
+	return or
 }
 
 func (c *CommandContext) AppendOK() []byte {

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/tidwall/gjson"
+	"github.com/pointc-io/ipdb/codec/gjson"
 )
 
 type errorType struct {

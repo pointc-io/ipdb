@@ -1,5 +1,4 @@
-// Package raftredcon provides a raft transport using the Redis protocol.
-//
+// Provides a raft transport using the Redis RESP protocol.
 package db
 
 import (
@@ -11,7 +10,6 @@ import (
 	"io"
 	"net"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +18,15 @@ import (
 	"github.com/pointc-io/ipdb/redcon"
 	"github.com/pointc-io/ipdb/service"
 	"github.com/pointc-io/ipdb/redcon/ev"
+)
+
+const (
+	// DefaultTimeoutScale is the default TimeoutScale in a NetworkTransport.
+	DefaultTimeoutScale = 256 * 1024 // 256KB
+
+	// rpcMaxPipeline controls the maximum number of outstanding
+	// AppendEntries RPC calls.
+	rpcMaxPipeline = 128
 )
 
 var (
@@ -35,8 +42,6 @@ type RESPTransport struct {
 	id       int
 	addr     raft.ServerAddress
 	consumer chan raft.RPC
-	//handleFn func(conn redcon.Conn, cmd redcon.Command)
-	//server   *redcon.Server
 
 	mu     sync.Mutex
 	pools  map[string]*redis.Pool
@@ -128,27 +133,15 @@ func (t *RESPTransport) getConn(target string) (redis.Conn, error) {
 
 // AppendEntriesPipeline returns an interface that can be used to pipeline AppendEntries requests.
 func (t *RESPTransport) AppendEntriesPipeline(id raft.ServerID, target raft.ServerAddress) (raft.AppendPipeline, error) {
+	//// Get a connection
+	//conn, err := t.getConn(string(target))
+	//if err != nil {
+	//	return nil, raft.ErrPipelineReplicationNotSupported
+	//}
+	//
+	//// Create the pipeline
+	//return newNetPipeline(t, conn), nil
 	return nil, raft.ErrPipelineReplicationNotSupported
-}
-
-type pipeline struct {
-}
-
-// AppendEntries is used to add another request to the pipeline.
-// The send may block which is an effective form of back-pressure.
-func (p *pipeline) AppendEntries(args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) (raft.AppendFuture, error) {
-	return nil, nil
-}
-
-// Consumer returns a channel that can be used to consume
-// response futures when they are ready.
-func (p *pipeline) Consumer() <-chan raft.AppendFuture {
-	return nil
-}
-
-// Close closes the pipeline and cancels all inflight RPCs
-func (p *pipeline) Close() error {
-	return nil
 }
 
 // encodeAppendEntriesRequest encodes AppendEntriesRequest arguments into a
@@ -434,11 +427,11 @@ func (t *RESPTransport) InstallSnapshot(
 }
 
 type snapshotHandler struct {
-	transport *RESPTransport
-	time time.Time
-	reader *io.PipeReader
-	writer *io.PipeWriter
-	handler evred.Handler
+	transport  *RESPTransport
+	time       time.Time
+	reader     *io.PipeReader
+	writer     *io.PipeWriter
+	handler    evred.Handler
 	downstream uint64
 }
 
@@ -447,7 +440,6 @@ func (s *snapshotHandler) ShardID(key string) int {
 }
 
 func (s *snapshotHandler) Commit(ctx *evred.CommandContext) {
-
 }
 
 func (s *snapshotHandler) Parse(ctx *evred.CommandContext) evred.Command {
@@ -455,7 +447,7 @@ func (s *snapshotHandler) Parse(ctx *evred.CommandContext) evred.Command {
 	conn := ctx.Conn
 	packet := ctx.Packet
 
-	switch strings.ToUpper(string(args[0])) {
+	switch ctx.Name {
 	default:
 		s.reader.CloseWithError(errInvalidRequest)
 		s.writer.CloseWithError(errInvalidRequest)
@@ -520,9 +512,9 @@ func (t *RESPTransport) HandleInstallSnapshot(conn *evred.Conn, arg []byte) evre
 
 	handler := &snapshotHandler{
 		transport: t,
-		time: time.Now(),
-		reader: rd,
-		writer: wr,
+		time:      time.Now(),
+		reader:    rd,
+		writer:    wr,
 	}
 	handler.handler = conn.SetHandler(handler)
 
@@ -805,4 +797,206 @@ func ReadRawResponse(rd *bufio.Reader) (raw []byte, kind byte, err error) {
 		}
 		return raw, kind, nil
 	}
+}
+
+// deferError can be embedded to allow a future
+// to provide an error in the future.
+type deferError struct {
+	err       error
+	errCh     chan error
+	responded bool
+}
+
+func (d *deferError) init() {
+	d.errCh = make(chan error, 1)
+}
+
+func (d *deferError) Error() error {
+	if d.err != nil {
+		// Note that when we've received a nil error, this
+		// won't trigger, but the channel is closed after
+		// send so we'll still return nil below.
+		return d.err
+	}
+	if d.errCh == nil {
+		panic("waiting for response on nil channel")
+	}
+	d.err = <-d.errCh
+	return d.err
+}
+
+func (d *deferError) respond(err error) {
+	if d.errCh == nil {
+		return
+	}
+	if d.responded {
+		return
+	}
+	d.errCh <- err
+	close(d.errCh)
+	d.responded = true
+}
+
+// appendFuture is used for waiting on a pipelined append
+// entries RPC.
+type appendFuture struct {
+	deferError
+	start time.Time
+	args  *raft.AppendEntriesRequest
+	resp  *raft.AppendEntriesResponse
+}
+
+func (a *appendFuture) Start() time.Time {
+	return a.start
+}
+
+func (a *appendFuture) Request() *raft.AppendEntriesRequest {
+	return a.args
+}
+
+func (a *appendFuture) Response() *raft.AppendEntriesResponse {
+	return a.resp
+}
+
+type netPipeline struct {
+	id    int
+	conn  redis.Conn
+	trans *RESPTransport
+
+	doneCh       chan raft.AppendFuture
+	inprogressCh chan *appendFuture
+
+	shutdown     bool
+	shutdownCh   chan struct{}
+	shutdownLock sync.Mutex
+}
+
+// newNetPipeline is used to construct a netPipeline from a given
+// transport and connection.
+func newNetPipeline(trans *RESPTransport, conn redis.Conn) *netPipeline {
+	n := &netPipeline{
+		id:           trans.id,
+		conn:         conn,
+		trans:        trans,
+		doneCh:       make(chan raft.AppendFuture, rpcMaxPipeline),
+		inprogressCh: make(chan *appendFuture, rpcMaxPipeline),
+		shutdownCh:   make(chan struct{}),
+	}
+	go n.decodeResponses()
+	return n
+}
+
+// decodeResponse is used to decode an RPC response and reports whether
+// the connection can be reused.
+//func decodeResponse(conn redis.Conn, resp interface{}) (bool, error) {
+//	// Decode the error if any
+//	var rpcError string
+//	if err := conn.dec.Decode(&rpcError); err != nil {
+//		conn.Close()
+//		return false, err
+//	}
+//
+//	// Decode the response
+//	if err := conn.dec.Decode(resp); err != nil {
+//		conn.Release()
+//		return false, err
+//	}
+//
+//	// Format an error if any
+//	if rpcError != "" {
+//		return true, fmt.Errorf(rpcError)
+//	}
+//	return true, nil
+//}
+
+// decodeResponses is a long running routine that decodes the responses
+// sent on the connection.
+func (n *netPipeline) decodeResponses() {
+	//timeout := n.trans.timeout
+	for {
+		select {
+		case future := <-n.inprogressCh:
+			//if timeout > 0 {
+			//n.conn.SetReadDeadline(time.Now().Add(timeout))
+			//}
+			reply, err := n.conn.Receive()
+
+			switch val := reply.(type) {
+			default:
+				future.respond(errInvalidResponse)
+			case redis.Error:
+				future.respond(err)
+			case []byte:
+				if !decodeAppendEntriesResponse(val, future.resp) {
+					future.respond(err)
+				} else {
+					future.respond(nil)
+				}
+			}
+
+			select {
+			case n.doneCh <- future:
+			case <-n.shutdownCh:
+				return
+			}
+		case <-n.shutdownCh:
+			return
+		}
+	}
+}
+
+// AppendEntries is used to pipeline a new append entries request.
+func (n *netPipeline) AppendEntries(args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) (raft.AppendFuture, error) {
+	// Create a new future
+	future := &appendFuture{
+		start: time.Now(),
+		args:  args,
+		resp:  resp,
+	}
+	future.init()
+
+	// Add a send timeout
+	//if timeout := n.trans.timeout; timeout > 0 {
+	//	n.conn.conn.SetWriteDeadline(time.Now().Add(timeout))
+	//}
+
+	err := n.conn.Send(raftAppendName, n.id, encodeAppendEntriesRequest(args))
+	if err != nil {
+		return nil, err
+	}
+
+	//// Send the RPC
+	//if err := sendRPC(n.conn, rpcAppendEntries, future.args); err != nil {
+	//	return nil, err
+	//}
+
+	// Hand-off for decoding, this can also cause back-pressure
+	// to prevent too many inflight requests
+	select {
+	case n.inprogressCh <- future:
+		return future, nil
+	case <-n.shutdownCh:
+		return nil, raft.ErrPipelineShutdown
+	}
+}
+
+// Consumer returns a channel that can be used to consume complete futures.
+func (n *netPipeline) Consumer() <-chan raft.AppendFuture {
+	return n.doneCh
+}
+
+// Closed is used to shutdown the pipeline connection.
+func (n *netPipeline) Close() error {
+	n.shutdownLock.Lock()
+	defer n.shutdownLock.Unlock()
+	if n.shutdown {
+		return nil
+	}
+
+	// Release the connection
+	n.conn.Close()
+
+	n.shutdown = true
+	close(n.shutdownCh)
+	return nil
 }

@@ -227,7 +227,7 @@ LOOP:
 				ctx.Out = redcon.AppendError(ctx.Out, fmt.Sprintf("ERR shard %d not on node", key))
 			}
 		} else {
-			if ctx.Conn.Consistency == evred.High {
+			if ctx.Conn.Durability == evred.High {
 				future := shard.raft.Apply(set.Data, raftTimeout)
 
 				var err error
@@ -455,17 +455,17 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 	case txModeName:
 		switch strings.ToUpper(key) {
 		default:
-			ctx.Conn.Consistency = evred.Medium
+			ctx.Conn.Durability = evred.Medium
 		case "0":
-			ctx.Conn.Consistency = evred.Medium
+			ctx.Conn.Durability = evred.Medium
 		case "MEDIUM":
-			ctx.Conn.Consistency = evred.Medium
+			ctx.Conn.Durability = evred.Medium
 		case "1":
-			ctx.Conn.Consistency = evred.High
+			ctx.Conn.Durability = evred.High
 		case "2":
-			ctx.Conn.Consistency = evred.High
+			ctx.Conn.Durability = evred.High
 		case "HIGH":
-			ctx.Conn.Consistency = evred.High
+			ctx.Conn.Durability = evred.High
 		}
 
 	case getName:
@@ -554,6 +554,19 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 
 	case delName:
 		return evred.WRITE
+
+	case "SHRINK":
+
+		d.mu.RLock()
+		shards := make([]*Shard, len(d.shards))
+		copy(shards, d.shards)
+		d.mu.RUnlock()
+
+		for _, shard := range shards {
+			shard.Shrink()
+		}
+
+		return evred.OK()
 
 	case "KEYS":
 		return evred.RAW(redcon.AppendInt(nil, int64(d.shards[0].db.NumKeys())))

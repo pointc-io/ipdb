@@ -5,7 +5,7 @@ import (
 	"github.com/pointc-io/ipdb/evio"
 )
 
-var maxCommandBacklog = 2048
+var maxCommandBacklog = 10000
 
 type Conn struct {
 	id       int
@@ -32,7 +32,7 @@ type Conn struct {
 	statsTotalUpstream   uint64
 	statsTotalDownstream uint64
 
-	Consistency ApplyMode
+	Durability Durability
 
 	ctx *CommandContext
 }

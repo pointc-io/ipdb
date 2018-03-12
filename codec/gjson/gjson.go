@@ -1515,6 +1515,31 @@ func unescape(json string) string { //, error) {
 //
 //  Null < False < Number < String < True < JSON
 //
+func (t Result) LessDup(token Result, caseSensitive bool) bool {
+	if t.Type < token.Type {
+		return true
+	}
+	if t.Type > token.Type {
+		return false
+	}
+	if t.Type == String {
+		if caseSensitive {
+			return t.Str <= token.Str
+		}
+		return stringLessInsensitive(t.Str, token.Str)
+	}
+	if t.Type == Number {
+		return t.Num <= token.Num
+	}
+	return t.Raw <= token.Raw
+}
+
+// Less return true if a token is less than another token.
+// The caseSensitive paramater is used when the tokens are Strings.
+// The order when comparing two different type is:
+//
+//  Null < False < Number < String < True < JSON
+//
 func (t Result) Less(token Result, caseSensitive bool) bool {
 	if t.Type < token.Type {
 		return true
@@ -1532,6 +1557,49 @@ func (t Result) Less(token Result, caseSensitive bool) bool {
 		return t.Num < token.Num
 	}
 	return t.Raw < token.Raw
+}
+
+// Less return true if a token is less than another token.
+// The caseSensitive paramater is used when the tokens are Strings.
+// The order when comparing two different type is:
+//
+//  Null < False < Number < String < True < JSON
+//
+func (t Result) LessTieBreaker(token Result, caseSensitive bool, key1, key2 string) bool {
+	if t.Type < token.Type {
+		return true
+	}
+	if t.Type > token.Type {
+		return false
+	}
+	if t.Type == String {
+		if caseSensitive {
+			if t.Str < token.Str {
+				return true
+			} else if t.Str > token.Str {
+				return false
+			} else {
+				return key1 < key2
+			}
+		}
+		return stringLessInsensitive(t.Str, token.Str)
+	}
+	if t.Type == Number {
+		if t.Num < token.Num {
+			return true
+		} else if t.Num > token.Num {
+			return false
+		} else {
+			return key1 < key2
+		}
+	}
+	if t.Raw < token.Raw {
+		return true
+	} else if t.Raw > token.Raw {
+		return false
+	} else {
+		return key1 < key2
+	}
 }
 
 func stringLessInsensitive(a, b string) bool {
