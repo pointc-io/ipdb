@@ -6,6 +6,9 @@ import (
 	"github.com/pointc-io/ipdb/codec/gjson"
 	"fmt"
 	"strconv"
+	"github.com/pointc-io/ipdb/codec/sjson"
+	"reflect"
+	"unsafe"
 )
 
 func BenchmarkForEachLine(b *testing.B) {
@@ -32,6 +35,7 @@ func BenchmarkForEachLine(b *testing.B) {
 		//fmt.Println("phones are", values)
 
 		rd.buf = rd.buf[0:l]
+		rd.off = 0
 		dec.Reset(rd)
 	}
 
@@ -52,6 +56,93 @@ func TestGJSON(b *testing.T) {
 	fmt.Println(gjson.Get(json, "attrs.phone"))
 	fmt.Println(gjson.Get(json, "attrs.phone").Type)
 	fmt.Println(gjson.Get("[32.00]", "[0]").Type)
+}
+
+func BenchmarkSJSONInPlace(b *testing.B) {
+	//jsonStr := "{\"id\": 1, \"name\":{\"first\":\"Mike\", \"last\":\"Wilkins\"}, \"attrs\":{\"phone\": 12345}}"
+	//f := *(*[]byte)(unsafe.Pointer(&jsonStr))
+	//f[0] = 122
+	//fmt.Println(jsonStr)
+
+	json := []byte("{\"id\": 1, \"name\":{\"first\":\"Mike\", \"last\":\"Wilkins\"}, \"attrs\":{\"phone\": 12345}}")
+	opts := &sjson.Options{Optimistic: true, ReplaceInPlace: true}
+
+
+	//jsonh := *(*reflect.StringHeader)(unsafe.Pointer(&json))
+	//jsonbh := reflect.SliceHeader{
+	//	Data: jsonh.Data, Len: jsonh.Len, Cap: jsonh.Len}
+	//jbytes := *(*[]byte)(unsafe.Pointer(&jsonbh))
+	//buf := *(*[]byte)(unsafe.Pointer(&json))
+	replaceWith := []byte("\"Clay\"")
+	path := "name.first"
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := sjson.SetRawBytesOptions(json, path, replaceWith, opts)
+		if err != nil {
+			b.Fatal(err)
+		}
+		//_ = c
+	}
+	//c, err := sjson.SetRawBytesOptions(json, "name.first", []byte("\"Clay\""), &sjson.Options{Optimistic: true, ReplaceInPlace: true})
+	//if err != nil {
+	//	b.Fatal(err)
+	//}
+	//fmt.Println(fmt.Sprintf("%s", json))
+	//fmt.Println(fmt.Sprintf("%s", c))
+}
+
+func TestSJSON(b *testing.T) {
+	//jsonStr := "{\"id\": 1, \"name\":{\"first\":\"Mike\", \"last\":\"Wilkins\"}, \"attrs\":{\"phone\": 12345}}"
+	//f := *(*[]byte)(unsafe.Pointer(&jsonStr))
+	//f[0] = 122
+	//fmt.Println(jsonStr)
+
+	json := []byte("{\"id\": 1, \"name\":{\"first\":\"Mike\", \"last\":\"Wilkins\"}, \"attrs\":{\"phone\": 12345}}")
+	fmt.Println(fmt.Sprintf("%s", json))
+
+
+	c, err := sjson.SetRawBytesOptions(json, "attrs.phone", []byte(strconv.Itoa((int)(gjson.GetBytes(json, "attrs.phone").Num) + 1)), &sjson.Options{Optimistic: false, ReplaceInPlace: false})
+	fmt.Println(fmt.Sprintf("%s", c))
+
+	newJson, err := sjson.SetBytes(json, "attrs.phone2", []string{"hi", "there"})
+	//newJson, err := sjson.SetBytes(json, "attrs.phone2", [1,2,3")
+	fmt.Println(fmt.Sprintf("%s", newJson))
+
+	//jsonh := *(*reflect.StringHeader)(unsafe.Pointer(&json))
+	//jsonbh := reflect.SliceHeader{
+	//	Data: jsonh.Data, Len: jsonh.Len, Cap: jsonh.Len}
+	//jbytes := *(*[]byte)(unsafe.Pointer(&jsonbh))
+	//buf := *(*[]byte)(unsafe.Pointer(&json))
+
+	c, err = sjson.SetRawBytesOptions(json, "name.first", []byte("\"Clay\""), &sjson.Options{Optimistic: false, ReplaceInPlace: false})
+	if err != nil {
+		b.Fatal(err)
+	}
+	fmt.Println(fmt.Sprintf("%s", json))
+	fmt.Println(fmt.Sprintf("%s", c))
+}
+
+func TestSJSONInPlace(b *testing.T) {
+	//jsonStr := "{\"id\": 1, \"name\":{\"first\":\"Mike\", \"last\":\"Wilkins\"}, \"attrs\":{\"phone\": 12345}}"
+	//f := *(*[]byte)(unsafe.Pointer(&jsonStr))
+	//f[0] = 122
+	//fmt.Println(jsonStr)
+
+	json := "{\"id\": 1, \"name\":{\"first\":\"Mike\", \"last\":\"Wilkins\"}, \"attrs\":{\"phone\": 12345}}"
+	//buf := *(*[]byte)(unsafe.Pointer(&json))
+	jsonh := *(*reflect.StringHeader)(unsafe.Pointer(&json))
+	jsonbh := reflect.SliceHeader{
+		Data: jsonh.Data, Len: jsonh.Len, Cap: jsonh.Len}
+	jbytes := *(*[]byte)(unsafe.Pointer(&jsonbh))
+
+	c, err := sjson.SetRawBytesOptions(jbytes, "name.first", []byte("\"Clay\""), &sjson.Options{Optimistic: true, ReplaceInPlace: true})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(fmt.Sprintf("%s", json))
+	fmt.Println(fmt.Sprintf("%s", c))
 }
 
 func BenchmarkGJSONParse(b *testing.B) {

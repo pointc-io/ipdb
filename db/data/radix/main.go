@@ -2,8 +2,8 @@ package main
 
 import (
 	"github.com/armon/go-radix"
-	"strconv"
 	"fmt"
+	"github.com/pointc-io/ipdb/db/data/sorted"
 )
 
 func main() {
@@ -12,12 +12,19 @@ func main() {
 	tree := radix.New()
 
 	for i := 0; i < 10000; i++ {
-		key := strconv.Itoa(i)
+		key := sorted.IntToString(i)
+		//key := strconv.Itoa(i)
 		tree.Insert(key, val)
 	}
 
-	m2, v2, _ := tree.LongestPrefix("50")
-	fmt.Println(m2)
+	//m2, v2, _ := tree.LongestPrefix("50")
+	//fmt.Println(m2)
+
+	tree.Walk(func(s string, v interface{}) bool {
+		fmt.Println(s)
+		fmt.Println(fmt.Sprintf("%s", v))
+		return false
+	})
 
 	m, v, ok := tree.Minimum()
 	if !ok {
@@ -26,14 +33,7 @@ func main() {
 		fmt.Println(m)
 		fmt.Println(fmt.Sprintf("%s", v))
 
-		tree.WalkPrefix(m, func(s string, v interface{}) bool {
-			fmt.Println(m)
-			fmt.Println(fmt.Sprintf("%s", v))
-			return false
-		})
 	}
-
-
 
 	//tree := art.New()
 	//

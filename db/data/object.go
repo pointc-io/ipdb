@@ -11,6 +11,7 @@ import (
 	"github.com/pointc-io/ipdb/db/data/btree"
 	"github.com/pointc-io/ipdb/db/data/grect"
 	"strconv"
+	"encoding/json"
 )
 
 var (
@@ -30,7 +31,6 @@ const (
 
 type ObjectStructure struct {
 	key   string // Key
-	Value string
 }
 
 func (b *ObjectStructure) ObjectType() ObjectType {
@@ -67,7 +67,7 @@ func (b *ObjectStructure) Restore(reader io.Reader) error {
 type JSONStructure struct {
 	ObjectStructure
 
-	value string
+	value []byte
 }
 
 func (b *JSONStructure) ObjectType() ObjectType {
@@ -78,8 +78,14 @@ func (b *JSONStructure) Get(path string) gjson.Result {
 	return gjson.Get(*(*string)(unsafe.Pointer(&b.value)), path)
 }
 
-func (b *JSONStructure) Set(path string, value interface{}) (string, error) {
-	return sjson.Set(b.value, path, value)
+func (b *JSONStructure) Set(path string, value interface{}) ([]byte, error) {
+	return sjson.SetBytes(b.value, path, value)
+}
+
+func (b *JSONStructure) Incr(path string, by int64) (int64, error) {
+	result := gjson.GetBytes(b.value, path)
+
+	return 0, nil
 }
 
 
@@ -200,7 +206,7 @@ func (b *RectStructure) ObjectType() ObjectType {
 }
 
 func (b *RectStructure) Value() float64 {
-	return b.value
+	return 0
 }
 
 // Snapshot RESP to AOF
@@ -227,29 +233,25 @@ func (b *RectStructure) Less(than btree.Item, ctx interface{}) bool {
 }
 
 
-func ParseType(value string) ObjectType {
-	if len(value) == 0 {
-		return Nil
-	}
-	b := *(*[]byte)(unsafe.Pointer(&value))
-	if b[0] == '{' {
-
-	}
-	switch b[0] {
-	case '{':
-		return JSON
-	case '-':
-	case '+':
-	case '0':
-	case '1':
-	case '2':
-	default:
-
-	}
-
-	return String
-}
-
-func maybeNumber() {
-
-}
+//func ParseType(value string) ObjectType {
+//	if len(value) == 0 {
+//		return Nil
+//	}
+//	b := *(*[]byte)(unsafe.Pointer(&value))
+//	if b[0] == '{' {
+//
+//	}
+//	switch b[0] {
+//	case '{':
+//		return JSON
+//	case '-':
+//	case '+':
+//	case '0':
+//	case '1':
+//	case '2':
+//	default:
+//
+//	}
+//
+//	return String
+//}

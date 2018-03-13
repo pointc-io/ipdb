@@ -11,6 +11,10 @@ type Rect struct {
 	Min, Max []float64
 }
 
+func (r Rect) Rect(ctx interface{}) (min []float64, max []float64) {
+	return r.Min, r.Max
+}
+
 func (r Rect) String() string {
 	diff := len(r.Min) != len(r.Max)
 	if !diff {
