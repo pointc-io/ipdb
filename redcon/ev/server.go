@@ -91,7 +91,7 @@ func NewServer(host string, eventLoops int) *Server {
 		loops: make([]*EvLoop, eventLoops),
 	}
 
-	s.BaseService = *service.NewBaseService(butterd.Logger, "evserver", s)
+	s.BaseService = *service.NewBaseService(sliced.Logger, "evserver", s)
 	return s
 }
 
@@ -173,7 +173,7 @@ func NewEventLoop(id int, server *Server) *EvLoop {
 		totalBytesIn:  metrics.NewCounter(),
 		totalBytesOut: metrics.NewCounter(),
 	}
-	e.BaseService = *service.NewBaseService(butterd.Logger, fmt.Sprintf("evloop-%d", id), e)
+	e.BaseService = *service.NewBaseService(sliced.Logger, fmt.Sprintf("evloop-%d", id), e)
 	return e
 }
 

@@ -7,5 +7,5 @@ import (
 )
 
 func VERSION() evred.Command {
-	return evred.RAW(redcon.AppendBulkString(nil, butterd.VersionStr))
+	return evred.RAW(redcon.AppendBulkString(nil, sliced.VersionStr))
 }

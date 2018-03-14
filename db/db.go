@@ -90,7 +90,7 @@ func NewDB(host, path string) *DB {
 		tree:   btree.New(64, nil),
 	}
 
-	d.BaseService = *service.NewBaseService(butterd.Logger, "db", d)
+	d.BaseService = *service.NewBaseService(sliced.Logger, "db", d)
 	return d
 }
 

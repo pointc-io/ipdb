@@ -47,18 +47,18 @@ func main() {
 
 	var cmdStatus = &cobra.Command{
 		Use:   "status",
-		Short: "Prints the current status of " + butterd.Name,
+		Short: "Prints the current status of " + sliced.Name,
 		Long:  ``,
 		Args:  cobra.MinimumNArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			pidfile := single.New(butterd.Name)
+			pidfile := single.New(sliced.Name)
 			l := pidfile.Lock()
 			if l.Success {
 				pidfile.Unlock()
-				butterd.Logger.Info().Msg("daemon is not running")
+				sliced.Logger.Info().Msg("daemon is not running")
 				return
 			} else {
-				butterd.Logger.Info().Msgf("daemon pid %d", l.Pid)
+				sliced.Logger.Info().Msgf("daemon pid %d", l.Pid)
 			}
 		},
 	}
@@ -82,7 +82,7 @@ func main() {
 	)
 
 	var cmdRoot = &cobra.Command{
-		Use: butterd.Name,
+		Use: sliced.Name,
 		// Default to start as daemon
 		Run: start,
 	}
@@ -90,9 +90,9 @@ func main() {
 	cmdRoot.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print the version number",
-		Long:  `All software has versions. This is ` + butterd.Name + `'s`,
+		Long:  `All software has versions. This is ` + sliced.Name + `'s`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(fmt.Sprintf("%s %s", butterd.Name, butterd.VersionStr))
+			fmt.Println(fmt.Sprintf("%s %s", sliced.Name, sliced.VersionStr))
 		},
 	})
 	cmdRoot.AddCommand(cmdStart, cmdStop, cmdStatus)
@@ -156,11 +156,11 @@ func defaultPath() string {
 
 // Viper init
 func config() {
-	viper.SetConfigName("config")                               // name of config file (without extension)
-	viper.AddConfigPath(fmt.Sprintf("/etc/%s/", butterd.Name))  // path to look for the config file in
-	viper.AddConfigPath(fmt.Sprintf("$HOME/.%s", butterd.Name)) // call multiple times to add many search paths
-	viper.AddConfigPath(".")                                    // optionally look for config in the working directory
-	err := viper.ReadInConfig()                                 // Find and read the config file
+	viper.SetConfigName("config")                              // name of config file (without extension)
+	viper.AddConfigPath(fmt.Sprintf("/etc/%s/", sliced.Name))  // path to look for the config file in
+	viper.AddConfigPath(fmt.Sprintf("$HOME/.%s", sliced.Name)) // call multiple times to add many search paths
+	viper.AddConfigPath(".")                                   // optionally look for config in the working directory
+	err := viper.ReadInConfig()                                // Find and read the config file
 	if err != nil { // incoming errors reading the config file
 		//panic(fmt.Errorf("Fatal error config file: %s \n", err))
 	}
@@ -168,17 +168,17 @@ func config() {
 
 func start(cmd *cobra.Command, args []string) {
 	// Change logger to Daemon Logger
-	butterd.Logger = butterd.DaemonLogger(console)
+	sliced.Logger = sliced.DaemonLogger(console)
 
 	zerolog.SetGlobalLevel(zerolog.Level(loglevel))
 	zerolog.TimeFieldFormat = time.RFC822Z
 
 	if !console {
 		// Ensure only 1 instance through PID lock
-		pidfile := single.New(butterd.Name)
+		pidfile := single.New(sliced.Name)
 		lockResult := pidfile.Lock()
 		if !lockResult.Success {
-			butterd.Logger.Error().Msgf("process already running pid:%d -- localhost:%d", lockResult.Pid, lockResult.Port)
+			sliced.Logger.Error().Msgf("process already running pid:%d -- localhost:%d", lockResult.Pid, lockResult.Port)
 			return
 		}
 		defer pidfile.Unlock()
@@ -186,10 +186,10 @@ func start(cmd *cobra.Command, args []string) {
 
 	// Create, Start and Wait for Daemon to exit
 	app := &Daemon{}
-	app.BaseService = *service.NewBaseService(butterd.Logger, "daemon", app)
+	app.BaseService = *service.NewBaseService(sliced.Logger, "daemon", app)
 	err := app.Start()
 	if err != nil {
-		butterd.Logger.Error().Err(err)
+		sliced.Logger.Error().Err(err)
 		return
 	}
 	app.Wait()
@@ -197,42 +197,42 @@ func start(cmd *cobra.Command, args []string) {
 
 func stop(force bool) {
 	// Ensure only 1 instance.
-	pidfile := single.New(butterd.Name)
+	pidfile := single.New(sliced.Name)
 	l := pidfile.Lock()
 	if l.Success {
 		pidfile.Unlock()
-		butterd.Logger.Info().Msg("daemon is not running")
+		sliced.Logger.Info().Msg("daemon is not running")
 		return
 	}
 
 	if l.Pid > 0 {
 		process, err := os.FindProcess(l.Pid)
 		if err != nil {
-			butterd.Logger.Info().Msgf("failed to find daemon pid %d", l.Pid)
-			butterd.Logger.Error().Err(err)
+			sliced.Logger.Info().Msgf("failed to find daemon pid %d", l.Pid)
+			sliced.Logger.Error().Err(err)
 		} else if process == nil {
-			butterd.Logger.Info().Msgf("failed to find daemon pid %d", l.Pid)
+			sliced.Logger.Info().Msgf("failed to find daemon pid %d", l.Pid)
 		} else {
 			if force {
-				butterd.Logger.Info().Msgf("killing daemon pid %d", l.Pid)
+				sliced.Logger.Info().Msgf("killing daemon pid %d", l.Pid)
 				err = process.Kill()
 				if err != nil {
-					butterd.Logger.Error().Err(err)
+					sliced.Logger.Error().Err(err)
 				} else {
-					butterd.Logger.Info().Msg("daemon was killed")
+					sliced.Logger.Info().Msg("daemon was killed")
 				}
 			} else {
-				butterd.Logger.Info().Msgf("sending SIGTERM signal to pid %d", l.Pid)
+				sliced.Logger.Info().Msgf("sending SIGTERM signal to pid %d", l.Pid)
 				err := process.Signal(syscall.SIGTERM)
 				if err != nil {
-					butterd.Logger.Error().Err(err)
+					sliced.Logger.Error().Err(err)
 				} else {
-					butterd.Logger.Info().Msgf("SIGTERM pid %d", l.Pid)
+					sliced.Logger.Info().Msgf("SIGTERM pid %d", l.Pid)
 				}
 			}
 		}
 	} else {
-		butterd.Logger.Info().Msg("daemon is not running")
+		sliced.Logger.Info().Msg("daemon is not running")
 	}
 }
 
@@ -252,7 +252,7 @@ func (d *Daemon) OnStart() error {
 	}
 	// Handle os signals.
 	c := make(chan os.Signal, 1)
-	slogger := butterd.Logger.With().Str("logger", "os.signal").Logger()
+	slogger := sliced.Logger.With().Str("logger", "os.signal").Logger()
 	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		s := <-c

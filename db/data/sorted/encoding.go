@@ -158,7 +158,7 @@ func init() {
 	}
 }
 
-//以下代码判断机器大小端
+//
 const INT_SIZE int = int(unsafe.Sizeof(0))
 
 //true = big endian, false = little endian

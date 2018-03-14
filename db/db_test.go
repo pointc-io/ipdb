@@ -12,11 +12,11 @@ import (
 var db *DB
 
 func init() {
-	butterd.Logger = butterd.CLILogger()
+	sliced.Logger = sliced.CLILogger()
 }
 
 func runFile(t *testing.T, f func(db *DB)) {
-	run(t, filepath.Join(butterd.Path, "data"), f)
+	run(t, filepath.Join(sliced.Path, "data"), f)
 }
 
 func runMemory(t *testing.T, f func(db *DB)) {

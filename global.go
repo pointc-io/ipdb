@@ -1,4 +1,4 @@
-package butterd
+package sliced
 
 import (
 	"os"
@@ -10,7 +10,7 @@ import (
 	"github.com/blang/semver"
 )
 
-var Name = "butterd"
+var Name = "sliced"
 var VersionStr = "0.1.0-1" // SemVer
 var Version semver.Version
 var GIT = ""
@@ -24,7 +24,7 @@ func init() {
 		panic(err)
 	}
 
-	Path = filepath.Join(usr.HomeDir, ".butterd")
+	Path = filepath.Join(usr.HomeDir, ".sliced")
 	err = os.MkdirAll(Path, 0700)
 	if err != nil {
 		panic(err)

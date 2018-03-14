@@ -118,7 +118,7 @@ func NewShard(id int, enableSingle bool, path, localID string, applier Applier) 
 		name = fmt.Sprintf("shard-%d", s.id)
 	}
 
-	s.BaseService = *service.NewBaseService(butterd.Logger, name, s)
+	s.BaseService = *service.NewBaseService(sliced.Logger, name, s)
 	return s
 }
 

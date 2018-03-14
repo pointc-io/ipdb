@@ -28,14 +28,14 @@ func (dbi *Item) writeSetTo(buf []byte) []byte {
 		ex := dbi.Expires
 		buf = appendArray(buf, 5)
 		buf = appendBulkString(buf, "SET")
-		buf = appendBulkString(buf, dbi.Key)
+		//buf = appendBulkString(buf, dbi.Key)
 		buf = appendBulkString(buf, string(dbi.AppendValue(nil)))
 		buf = appendBulkString(buf, "EX")
 		buf = appendBulkString(buf, strconv.FormatUint(uint64(ex), 10))
 	} else {
 		buf = appendArray(buf, 3)
 		buf = appendBulkString(buf, "SET")
-		buf = appendBulkString(buf, dbi.Key)
+		//buf = appendBulkString(buf, dbi.Key)
 		buf = appendBulkString(buf, string(dbi.AppendValue(nil)))
 	}
 	return buf
@@ -45,6 +45,6 @@ func (dbi *Item) writeSetTo(buf []byte) []byte {
 func (dbi *Item) writeDeleteTo(buf []byte) []byte {
 	buf = appendArray(buf, 2)
 	buf = appendBulkString(buf, "del")
-	buf = appendBulkString(buf, dbi.Key)
+	//buf = appendBulkString(buf, dbi.Key)
 	return buf
 }

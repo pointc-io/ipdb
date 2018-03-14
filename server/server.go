@@ -25,7 +25,7 @@ func NewServer(host string, path string, eventLoops int) *Server {
 
 	s.server = evred.NewServer(host, eventLoops)
 
-	s.BaseService = *service.NewBaseService(butterd.Logger, "server", s)
+	s.BaseService = *service.NewBaseService(sliced.Logger, "server", s)
 	return s
 }
 
