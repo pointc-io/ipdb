@@ -7,12 +7,98 @@ import (
 	"time"
 	"encoding/binary"
 	"unsafe"
+	"github.com/pointc-io/ipdb/db/data/btree"
+	"github.com/pointc-io/ipdb/db/data/sorted"
 )
 
+type Item struct {
+	key   string
+	value string
+
+	expires int32
+	idxs    [4]byte
+}
+
+type integer struct {
+	a, b, c, d, e, f, g, h byte
+}
+
+func (i integer) AsInt() {
+
+}
+
+type s1 struct {
+	a1   *s2
+	a2   *s2
+	key  string
+	key2 *string
+}
+
+type s2 struct {
+	tr      *btree.BTree
+	tr2     *btree.BTree
+	float32 float64
+}
+
+type s3 struct {
+	float64 float64
+}
+
+type FloatItem struct {
+	tr  *btree.BTree
+	tr2 *btree.BTree
+	key sorted.FloatKey
+}
+
 func main() {
+	fmt.Println(unsafe.Sizeof(s2{}))
+	fmt.Println(unsafe.Sizeof(FloatItem{}))
+}
+
+func main8() {
+	var s integer
+
+	fmt.Println(unsafe.Sizeof(s1{}))
+
+	str := "hello"
+	fmt.Println(unsafe.Sizeof(str))
+	strb := *(*[]byte)(unsafe.Pointer(&str))
+
+	//strb[0] = 'C'
+	fmt.Println(string(strb))
+
+	v := int64(10)
+	s.h = byte(v >> 56)
+	s.g = byte(v >> 48)
+	s.f = byte(v >> 40)
+	s.e = byte(v >> 32)
+	s.d = byte(v >> 24)
+	s.c = byte(v >> 16)
+	s.b = byte(v >> 8)
+	s.a = byte(v)
+
+	fmt.Println(v)
+	fmt.Println(s)
+	fmt.Println(*(*int64)(unsafe.Pointer(&s)))
+
+	fmt.Println(unsafe.Sizeof([16]byte{}))
+	fmt.Println(unsafe.Sizeof(integer{}))
+	fmt.Println(unsafe.Sizeof(Item{}))
+
+	fmt.Println(unsafe.Sizeof(s2{tr: nil}))
+	fmt.Println(unsafe.Sizeof(s3{}))
+
+	fmt.Println(unsafe.Sizeof(""))
+
+	fmt.Println(unsafe.Sizeof([]byte{}))
+	fmt.Println(unsafe.Sizeof(float64(0)))
+	fmt.Println(unsafe.Sizeof(float32(0)))
+}
+
+func main3() {
 	t := radix2.New("BenchmarkSingleStatic")
 
-	buf := make([]byte, 16)
+	var buf = make([]byte, 16)
 	var now int64
 	count := uint64(0)
 
@@ -66,7 +152,7 @@ func main2() {
 		time.Sleep(time.Millisecond)
 	}
 
-	binary.BigEndian.PutUint64(buf, uint64(time.Now().UnixNano() / int64(time.Millisecond) - int64((100))))
+	binary.BigEndian.PutUint64(buf, uint64(time.Now().UnixNano()/int64(time.Millisecond)-int64((100))))
 	binary.BigEndian.PutUint64(buf[8:], 0)
 
 	//i, ok := r.Get("foo")

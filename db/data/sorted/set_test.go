@@ -59,11 +59,22 @@ func TestJsonSpatial(t *testing.T) {
 	})
 }
 
+func TestRect(t *testing.T) {
+	str := EncodeFloat64("30")
+	fmt.Println(StrAsFloat64(str))
+	fmt.Println(unsafe.Sizeof(FloatKey{}))
+	fmt.Println(unsafe.Sizeof(NilKey{}))
+}
+
 func TestSecondary(t *testing.T) {
+	key := &floatKey{}
+	fmt.Println(unsafe.Offsetof(key.key))
+
 	db := New()
 
 	//db.CreateJSONStringIndex("last_name", "p:*", "name.last")
-	db.CreateIndexM("last_name_age", "p:*", JSONString("name.last"), JSONNumber("age"))
+	//db.CreateIndexM("last_name_age", "p:*", JSONString("name.last"), JSONNumber("age"))
+	//db.CreateIndexM("last_name_age", "p:*", JSONNumber("age"), JSONString("name.last"))
 	db.CreateJSONIndex("last_name", "p:*", "name.last")
 	db.CreateJSONNumberIndex("age", "p:*", "age")
 
@@ -89,17 +100,18 @@ func TestSecondary(t *testing.T) {
 	//})
 
 	fmt.Println("Order by age range 30-50")
-	db.Ascend("last_name_age", func(key string, value *Item) bool {
-		res := gjson.Get(value.Value, "name.last")
-		age := gjson.Get(value.Value, "age")
-		fmt.Printf("%s: %s\n", age.Raw, res.Str)
+	db.Ascend("last_name", func(key IndexItem) bool {
+		res := gjson.Get(key.Item().Value, "name.last")
+		age := gjson.Get(key.Item().Value, "age")
+		fmt.Printf("%s: %s\n", age.Raw, res.Raw)
 		return true
 	})
 
 	fmt.Println("Order by age range 30-50")
-	db.AscendRange("age", EncodeFloat("30"), EncodeFloat("50"), func(key string, value *Item) bool {
-		res := gjson.Get(value.Value, "name.last")
-		age := gjson.Get(value.Value, "age")
+	db.AscendRange("age", FloatKey{30}, FloatKey{52}, func(key IndexItem) bool {
+		//db.AscendRange("age", &floatKey{key: 30}, &floatKey{key: 51}, func(key IndexItem) bool {
+		res := gjson.Get(key.Item().Value, "name.last")
+		age := gjson.Get(key.Item().Value, "age")
 		fmt.Printf("%s: %s\n", age.Raw, res.Str)
 		return true
 	})
@@ -137,30 +149,30 @@ func TestDesc(t *testing.T) {
 	db.CreateIndex("age2", "a:*")
 
 	fmt.Println("Order by last name")
-	db.Descend("last_name", func(key string, value *Item) bool {
-		fmt.Printf("%s: %s\n", key, value)
+	db.Descend("last_name", func(key IndexItem) bool {
+		fmt.Printf("%s: %s\n", key, key.Item().Value)
 		return true
 	})
 	fmt.Println("Order by age")
-	db.Ascend("age", func(key string, value *Item) bool {
-		fmt.Printf("%s: %s\n", key, value)
+	db.Ascend("age", func(key IndexItem) bool {
+		fmt.Printf("%s: %s\n", key, key.Item().Value)
 		return true
 	})
 	fmt.Println("Order by age range 30-50")
-	db.AscendRange("age", `{"age":30}`, `{"age":50}`, func(key string, value *Item) bool {
-		fmt.Printf("%s: %s\n", key, value)
-		return true
-	})
+	//db.AscendRange("age", `{"age":30}`, `{"age":50}`, func(key IndexItem) bool {
+	//	fmt.Printf("%s: %s\n", key, key.Item().Value)
+	//	return true
+	//})
+	//
+	//fmt.Println("Order by age")
+	//db.AscendRange("age2", `28`, "50", func(key IndexItem) bool {
+	//	fmt.Printf("%s: %s\n", key, key.Item().Value)
+	//	return true
+	//})
 
 	fmt.Println("Order by age")
-	db.AscendRange("age2", `28`, "50", func(key string, value *Item) bool {
-		fmt.Printf("%s: %s\n", key, value)
-		return true
-	})
-
-	fmt.Println("Order by age")
-	db.Ascend("age2", func(key string, value *Item) bool {
-		fmt.Printf("%s: %s\n", key, value)
+	db.Ascend("age2", func(key IndexItem) bool {
+		fmt.Printf("%s: %s\n", key, key.Item().Value)
 		return true
 	})
 }

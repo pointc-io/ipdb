@@ -7,6 +7,10 @@ import (
 	"github.com/pointc-io/ipdb/db/data/rtree"
 	"github.com/pointc-io/ipdb/db/data/match"
 	"github.com/armon/go-radix"
+	"github.com/pointc-io/ipdb/codec/gjson"
+	"github.com/pointc-io/ipdb/db/data/grect"
+	"strconv"
+	"unsafe"
 )
 
 // IndexOptions provides an idx with additional features or
@@ -29,7 +33,6 @@ const (
 // b-tree/r-tree context for itself.
 type index struct {
 	db      *Set // the origin database
-	id      uint8
 	t       IndexType
 	btr     *btree.BTree // contains the items
 	rtr     *rtree.RTree // contains the items
@@ -37,9 +40,21 @@ type index struct {
 	name    string // name of the idx
 	pattern string // a required key pattern
 
-	opts IndexOptions // idx options
+	length int
+	memory uint64
 
-	factory func(idx *index, item *Item) IndexItem
+	opts IndexOptions // idx options
+	idxr indexFactory
+}
+
+func (i *index) Length() int {
+	if i.btr != nil {
+		return i.btr.Len()
+	} else if i.rtr != nil {
+		return i.rtr.Count()
+	} else {
+		return 0
+	}
 }
 
 func (i *index) remove(item IndexItem) IndexItem {
@@ -131,7 +146,7 @@ func (idx *index) rebuild() {
 		switch idx.t {
 		case BTree:
 			if sk == nil {
-				sk = idx.factory(idx, dbi)
+				sk = idx.idxr(idx, dbi)
 				if sk != nil {
 					dbi.indexes = append(dbi.indexes, sk)
 				}
@@ -147,7 +162,7 @@ func (idx *index) rebuild() {
 
 		case RTree:
 			if sk == nil {
-				sk = idx.factory(idx, dbi)
+				sk = idx.idxr(idx, dbi)
 				if sk != nil {
 					dbi.indexes = append(dbi.indexes, sk)
 				}
@@ -206,20 +221,18 @@ func (db *Set) CreateIndexOptions(name, pattern string,
 // The IndexRect is a default function that can be used for the rect
 // parameter.
 func (db *Set) CreateSpatialIndex(name, pattern string) error {
-	return db.createSecondaryIndex(RTree, name, pattern, SpatialKey(RectValue), nil)
+	return db.createSecondaryIndex(RTree, name, pattern, spatialIndex(), nil)
 }
 
 // CreateSpatialIndexOptions is the same as CreateSpatialIndex except that
 // it allows for additional options.
 func (db *Set) CreateSpatialIndexOptions(name, pattern string,
 	opts *IndexOptions) error {
-	return db.createSecondaryIndex(RTree, name, pattern, SpatialKey(RectValue), nil)
+	return db.createSecondaryIndex(RTree, name, pattern, spatialIndex(), nil)
 }
 
 // createIndex is called by CreateIndex() and CreateSpatialIndex()
-func (db *Set) createIndex(idxType IndexType, name string, pattern string,
-	opts *IndexOptions,
-) error {
+func (db *Set) createIndex(idxType IndexType, name, pattern string, opts *IndexOptions) error {
 	if name == "" {
 		// cannot create an idx without a name.
 		// an empty name idx is designated for the main "keys" tree.
@@ -252,29 +265,29 @@ func (db *Set) createIndex(idxType IndexType, name string, pattern string,
 	return nil
 }
 
-func (db *Set) CreateIndexM(name, pattern string, fields... IndexValue) error {
-	return db.createSecondaryIndex(BTree, name, pattern, CompositeKey(fields...), nil)
+func (db *Set) CreateIndexM(name, pattern string, fields ... projector) error {
+	return db.createSecondaryIndex(BTree, name, pattern, compositeIndex(fields...), nil)
 }
 
 func (db *Set) CreateJSONIndex(name, pattern string, path string) error {
-	return db.createSecondaryIndex(BTree, name, pattern, Key(JSONWildcard(path)), nil)
+	return db.createSecondaryIndex(BTree, name, pattern, jsonWildcardIndex(jsonWildcardProjector(path)), nil)
 }
 
 func (db *Set) CreateJSONSpatialIndex(name, pattern string, path string) error {
-	return db.createSecondaryIndex(RTree, name, pattern, SpatialKey(JSONRect(path)), nil)
+	return db.createSecondaryIndex(RTree, name, pattern, jsonSpatialIndex(jsonRect(path)), nil)
 }
 
 func (db *Set) CreateJSONNumberIndex(name, pattern string, path string) error {
-	return db.createSecondaryIndex(BTree, name, pattern, Key(JSONNumber(path)), nil)
+	return db.createSecondaryIndex(BTree, name, pattern, jsonFloatIndex(jsonFloatProjector(path)), nil)
 }
 
 func (db *Set) CreateJSONStringIndex(name, pattern string, path string) error {
-	return db.createSecondaryIndex(BTree, name, pattern, Key(JSONString(path)), nil)
+	return db.createSecondaryIndex(BTree, name, pattern, jsonStringIndex(jsonStringProjector(path)), nil)
 }
 
 // createIndex is called by CreateIndex() and CreateSpatialIndex()
 func (db *Set) createSecondaryIndex(idxType IndexType, name string, pattern string,
-	factory func(idx *index, item *Item) IndexItem,
+	factory indexFactory,
 	opts *IndexOptions,
 ) error {
 	if name == "" {
@@ -302,9 +315,9 @@ func (db *Set) createSecondaryIndex(idxType IndexType, name string, pattern stri
 		pattern: pattern,
 		//less:    less,
 		//rect:    rect,
-		db:      db,
-		opts:    sopts,
-		factory: factory,
+		db:   db,
+		opts: sopts,
+		idxr: factory,
 	}
 	// save the idx
 	db.insertIndex(idx)
@@ -327,4 +340,574 @@ func (db *Set) DropIndex(name string) error {
 	db.removeIndex(idx)
 
 	return nil
+}
+
+
+
+//
+func StringValue() func(item *Item) (string, bool) {
+	return func(item *Item) (string, bool) {
+		return item.Value, true
+	}
+}
+
+//
+func NumberValue() func(item *Item) (string, bool) {
+	return func(item *Item) (string, bool) {
+		num, err := strconv.ParseFloat(item.Value, 64)
+		if err != nil {
+			return "", false
+		}
+		return FloatToString(num), true
+	}
+}
+
+//
+func RectValue(item *Item) ([]float64, []float64, bool) {
+	rect := grect.Get(item.Value)
+	if len(rect.Min) == 0 && len(rect.Max) == 0 {
+		return nil, nil, false
+	}
+	return rect.Min, rect.Max, true
+}
+
+//
+func JSONString(path string) func(item *Item) (string, bool) {
+	return func(item *Item) (string, bool) {
+		result := gjson.Get(item.Value, path)
+
+		switch result.Type {
+		default:
+			return "", false
+		case gjson.String:
+		}
+
+		return result.Str, true
+	}
+}
+
+//
+func JSONNumber(path string) func(item *Item) (string, bool) {
+	return func(item *Item) (string, bool) {
+		result := gjson.Get(item.Value, path)
+
+		switch result.Type {
+		default:
+			return "", false
+		case gjson.Number:
+		}
+
+		return FloatToString(result.Num), true
+	}
+}
+
+//
+func jsonRect(path string) spatialProjector {
+	return func(item *Item) ([]float64, []float64, bool) {
+		result := gjson.Get(item.Value, path)
+
+		var min, max []float64
+		if result.Type == gjson.String {
+			rect := grect.Get(result.Str)
+			min = rect.Min
+			max = rect.Max
+		} else if result.Type == gjson.JSON {
+			if result.Raw[0] == '[' {
+				rect := grect.Get(result.Raw)
+				min = rect.Min
+				max = rect.Max
+			} else {
+				return nil, nil, false
+			}
+		} else {
+			return nil, nil, false
+		}
+
+		if min == nil && max == nil {
+			return nil, nil, false
+		}
+
+		return min, max, true
+	}
+}
+
+//
+func jsonWildcard(path string) projector {
+	return func(item *Item) (string, bool) {
+		result := gjson.Get(item.Value, path)
+
+		switch result.Type {
+		case gjson.String:
+			return result.Str, true
+		case gjson.Null:
+			return "", true
+		case gjson.JSON:
+			return "", false
+		case gjson.True:
+			return string([]byte{1}), true
+		case gjson.False:
+			return string([]byte{0}), true
+		case gjson.Number:
+			return FloatToString(result.Num), true
+		default:
+			return result.Raw, true
+		}
+	}
+}
+
+const (
+	MaxIndexLength = 512
+)
+
+func jsonWildcardProjector(path string) func(item *Item) (string, bool) {
+	return func(item *Item) (string, bool) {
+		result := gjson.Get(item.Value, path)
+
+		switch result.Type {
+		case gjson.String:
+			return result.Str, true
+		case gjson.Null:
+			return "", true
+		case gjson.JSON:
+			return "", false
+		case gjson.True:
+			return string(0x01), true
+		case gjson.False:
+			return string(0x00), true
+		case gjson.Number:
+			return FloatToString(result.Num), true
+		default:
+			if len(result.Raw) < MaxIndexLength {
+				return result.Raw, true
+			} else {
+				return "", false
+			}
+		}
+	}
+}
+
+func jsonStringProjector(path string) func(item *Item) (string, bool) {
+	return func(item *Item) (string, bool) {
+		result := gjson.Get(item.Value, path)
+
+		switch result.Type {
+		case gjson.String:
+			return result.Str, true
+		case gjson.Null:
+			return "", true
+		default:
+			return "", false
+		}
+	}
+}
+
+func jsonIntProjector(path string) func(item *Item) (int64, bool) {
+	return func(item *Item) (int64, bool) {
+		result := gjson.Get(item.Value, path)
+
+		switch result.Type {
+		case gjson.String:
+			return 0, false
+		case gjson.Null:
+			return 0, false
+		case gjson.JSON:
+			return 0, false
+		case gjson.True:
+			return 0, false
+		case gjson.False:
+			return 0, false
+		case gjson.Number:
+			return int64(result.Num), true
+		default:
+			return 0, false
+		}
+	}
+}
+
+func jsonNumberProjector(path string) func(item *Item) (float64, bool) {
+	return func(item *Item) (float64, bool) {
+		result := gjson.Get(item.Value, path)
+
+		switch result.Type {
+		case gjson.String:
+			return 0, false
+		case gjson.Null:
+			return 0, false
+		case gjson.JSON:
+			return 0, false
+		case gjson.True:
+			return 0, false
+		case gjson.False:
+			return 0, false
+		case gjson.Number:
+			return result.Num, true
+		default:
+			return 0, false
+		}
+	}
+}
+
+func jsonFloatProjector(path string) func(item *Item) (float64, bool) {
+	return func(item *Item) (float64, bool) {
+		result := gjson.Get(item.Value, path)
+
+		switch result.Type {
+		case gjson.String:
+			return 0, false
+		case gjson.Null:
+			return 0, false
+		case gjson.JSON:
+			return 0, false
+		case gjson.True:
+			return 0, false
+		case gjson.False:
+			return 0, false
+		case gjson.Number:
+			return result.Num, true
+		default:
+			return 0, false
+		}
+	}
+}
+
+func jsonRectProjector(path string) func(item *Item) ([]float64, []float64, bool) {
+	return func(item *Item) ([]float64, []float64, bool) {
+		result := gjson.Get(item.Value, path)
+
+		var min, max []float64
+		if result.Type == gjson.String {
+			rect := grect.Get(result.Str)
+			min = rect.Min
+			max = rect.Max
+		} else if result.Type == gjson.JSON {
+			if result.Raw[0] == '[' {
+				rect := grect.Get(result.Raw)
+				min = rect.Min
+				max = rect.Max
+			} else {
+				return nil, nil, false
+			}
+		} else {
+			return nil, nil, false
+		}
+
+		if min == nil && max == nil {
+			return nil, nil, false
+		}
+
+		return min, max, true
+	}
+}
+
+func valueWildcardProjector(item *Item) (string, bool) {
+	return item.Value, true
+}
+
+func valueStringProjector(item *Item) (string, bool) {
+	if item.Type == String {
+		return item.Value, true
+	}
+	return "", false
+}
+
+func valueIntProjector(item *Item) (int64, bool) {
+	if item.Type == Float {
+		return int64(*(*float64)(unsafe.Pointer(&item.Value))), true
+	} else if item.Type == Integer {
+		return *(*int64)(unsafe.Pointer(&item.Value)), true
+	}
+	num, err := strconv.ParseInt(item.Value, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return num, true
+}
+
+func valueNumberProjector(item *Item) (float64, bool) {
+	if item.Type == Float {
+		return *(*float64)(unsafe.Pointer(&item.Value)), true
+	} else if item.Type == Integer {
+		return float64(*(*int64)(unsafe.Pointer(&item.Value))), true
+	}
+	num, err := strconv.ParseFloat(item.Value, 64)
+	if err != nil {
+		return 0, false
+	}
+	return num, true
+}
+
+func valueFloatProjector(item *Item) (float64, bool) {
+	if item.Type == Float {
+		return *(*float64)(unsafe.Pointer(&item.Value)), true
+	} else if item.Type == Integer {
+		return float64(*(*int64)(unsafe.Pointer(&item.Value))), true
+	}
+	num, err := strconv.ParseFloat(item.Value, 64)
+	if err != nil {
+		return 0, false
+	}
+	return num, true
+}
+
+func valueRectProjector(item *Item) ([]float64, []float64, bool) {
+	rect := grect.Get(item.Value)
+	if len(rect.Min) == 0 && len(rect.Max) == 0 {
+		return nil, nil, false
+	}
+	return rect.Min, rect.Max, true
+}
+
+//
+func spatialIndex() indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		min, max, ok := valueRectProjector(item)
+		if !ok {
+			return nil
+		}
+		return &rectKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			min: min,
+			max: max,
+		}
+	}
+}
+
+//
+func jsonSpatialIndex(val spatialProjector) indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		min, max, ok := val(item)
+		if !ok {
+			return nil
+		}
+		return &rectKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			min: min,
+			max: max,
+		}
+	}
+}
+
+func valueIndex() indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := valueWildcardProjector(item)
+		if !ok {
+			return nil
+		}
+		return &stringKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key: StringKey{i},
+		}
+	}
+}
+
+func stringIndex() indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := valueStringProjector(item)
+		if !ok {
+			return nil
+		}
+		return &stringKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key: StringKey{i},
+		}
+	}
+}
+
+func intIndex() indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := valueIntProjector(item)
+		if !ok {
+			return nil
+		}
+		return &intKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key: IntKey{i},
+		}
+	}
+}
+
+func floatIndex() indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := valueFloatProjector(item)
+		if !ok {
+			return nil
+		}
+		return &floatKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key: FloatKey{i},
+		}
+	}
+}
+
+func jsonWildcardIndex(val projector) indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := val(item)
+		if !ok {
+			return nil
+		}
+		return &stringKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key: StringKey{i},
+		}
+	}
+}
+
+func jsonWildcardIndexer(val projector) *indexer {
+	return &indexer{
+		factory: func(idx *index, item *Item) IndexItem {
+			i, ok := val(item)
+			if !ok {
+				return nil
+			}
+			return &stringKey{
+				indexItem: indexItem{
+					idx:  idx,
+					item: item,
+				},
+				key: StringKey{i},
+			}
+		},
+		prototype: &stringKey{},
+	}
+}
+
+func jsonStringIndex(val projector) indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := val(item)
+		if !ok {
+			return nil
+		}
+		return &stringKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key: StringKey{i},
+		}
+	}
+}
+
+func jsonIntIndex(val intProjector) indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := val(item)
+		if !ok {
+			return nil
+		}
+		return &intKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key: IntKey{i},
+		}
+	}
+}
+
+func jsonFloatIndex(val floatProjector) indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := val(item)
+		if !ok {
+			return nil
+		}
+		return &floatKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key: FloatKey{i},
+		}
+	}
+}
+
+func jsonSSIndex(val projector, val2 projector) indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := val(item)
+		if !ok {
+			return nil
+		}
+		i2, ok := val2(item)
+		if !ok {
+			return nil
+		}
+
+		return &compositeKey2{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key:  i,
+			key2: i2,
+		}
+	}
+}
+
+func jsonSIIndex(val projector, val2 intProjector) indexFactory {
+	return func(idx *index, item *Item) IndexItem {
+		i, ok := val(item)
+		if !ok {
+			return nil
+		}
+		i2, ok := val2(item)
+		if !ok {
+			return nil
+		}
+
+		return &compositeSIIKey{
+			indexItem: indexItem{
+				idx:  idx,
+				item: item,
+			},
+			key:  i,
+			key2: i2,
+		}
+	}
+}
+
+func compositeIndex(val ... projector) indexFactory {
+	switch len(val) {
+	case 0:
+		panic("need at least 1")
+	case 1:
+		return nil
+		//return valueIndex(val[0])
+	default:
+		val1 := val[0]
+		val2 := val[1]
+		return func(idx *index, item *Item) IndexItem {
+			key, ok := val1(item)
+			if !ok {
+				return nil
+			}
+			key2, ok := val2(item)
+			return &compositeKey2{
+				indexItem: indexItem{
+					idx:  idx,
+					item: item,
+				},
+				key:  key,
+				key2: key2,
+			}
+		}
+	}
 }

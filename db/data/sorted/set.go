@@ -61,11 +61,11 @@ var defaultFreeList = new(btree.FreeList)
 type Set struct {
 	commitIndex uint64
 
-	items   *btree.BTree
-	idxs    map[string]*index
-	exps    *btree.BTree
-	closed  bool
-	mu      sync.RWMutex
+	items  *btree.BTree
+	idxs   map[string]*index
+	exps   *btree.BTree
+	closed bool
+	mu     sync.RWMutex
 }
 
 func New() *Set {
@@ -166,7 +166,7 @@ func (db *Set) insert(item *Item) *Item {
 			continue
 		}
 
-		sk := idx.factory(idx, item)
+		sk := idx.idxr(idx, item)
 		if sk == nil {
 			continue
 		}
@@ -339,11 +339,11 @@ func (db *Set) scan(desc, gt, lt bool, index, start, stop string,
 }
 
 func (db *Set) scanSecondary(desc, gt, lt bool, index, start, stop string,
-	iterator func(key string, value *Item) bool) error {
+	iterator func(key IndexItem) bool) error {
 	// wrap a btree specific iterator around the user-defined iterator.
 	iter := func(item btree.Item) bool {
-		dbi := item.(*stringKey)
-		return iterator(dbi.key, dbi.item)
+		dbi := item.(IndexItem)
+		return iterator(dbi)
 	}
 	var tr *btree.BTree
 	if index == "" {
@@ -363,8 +363,60 @@ func (db *Set) scanSecondary(desc, gt, lt bool, index, start, stop string,
 	// create some limit items
 	var itemA, itemB *stringKey
 	if gt || lt {
-		itemA = &stringKey{key: start}
-		itemB = &stringKey{key: stop}
+		itemA = &stringKey{key: StringKey{start}}
+		itemB = &stringKey{key: StringKey{stop}}
+	}
+
+	if desc {
+		if gt {
+			if lt {
+				tr.DescendRange(itemA, itemB, iter)
+			} else {
+				tr.DescendGreaterThan(itemA, iter)
+			}
+		} else if lt {
+			tr.DescendLessOrEqual(itemA, iter)
+		} else {
+			tr.Descend(iter)
+		}
+	} else {
+		if gt {
+			if lt {
+				tr.AscendRange(itemA, itemB, iter)
+			} else {
+				tr.AscendGreaterOrEqual(itemA, iter)
+			}
+		} else if lt {
+			tr.AscendLessThan(itemA, iter)
+		} else {
+			tr.Ascend(iter)
+		}
+	}
+	return nil
+}
+
+func (db *Set) scanSecondaryIndex(desc, gt, lt bool, index string, start, stop btree.Item,
+	iterator func(key IndexItem) bool) error {
+	// wrap a btree specific iterator around the user-defined iterator.
+	iter := func(item btree.Item) bool {
+		dbi := item.(IndexItem)
+		return iterator(dbi)
+	}
+	var tr *btree.BTree
+	idx := db.idxs[index]
+	if idx == nil {
+		// idx was not found. return error
+		return ErrNotFound
+	}
+	tr = idx.btr
+	if tr == nil {
+		return nil
+	}
+	// create some limit items
+	var itemA, itemB btree.Item
+	if gt || lt {
+		itemA = start
+		itemB = stop
 	}
 
 	if desc {
@@ -465,13 +517,8 @@ func (db *Set) Intersects(index, bounds string,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the item key.
 // An invalid idx will return an error.
-func (db *Set) Ascend(index string,
-	iterator func(key string, value *Item) bool) error {
-	if index == "" {
-		return db.scan(false, false, false, index, "", "", iterator)
-	} else {
-		return db.scanSecondary(false, false, false, index, "", "", iterator)
-	}
+func (db *Set) AscendPrimary(iterator func(key string, value *Item) bool) error {
+	return db.scan(false, false, false, "", "", "", iterator)
 }
 
 // AscendGreaterOrEqual calls the iterator for every item in the database within
@@ -480,13 +527,9 @@ func (db *Set) Ascend(index string,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the item key.
 // An invalid idx will return an error.
-func (db *Set) AscendGreaterOrEqual(index, pivot string,
+func (db *Set) AscendGreaterOrEqualPrimary(index, pivot string,
 	iterator func(key string, value *Item) bool) error {
-	if index == "" {
-		return db.scan(false, true, false, index, pivot, "", iterator)
-	} else {
-		return db.scanSecondary(false, true, false, index, pivot, "", iterator)
-	}
+	return db.scan(false, true, false, "", pivot, "", iterator)
 }
 
 // AscendLessThan calls the iterator for every item in the database within the
@@ -495,13 +538,9 @@ func (db *Set) AscendGreaterOrEqual(index, pivot string,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the item key.
 // An invalid idx will return an error.
-func (db *Set) AscendLessThan(index, pivot string,
+func (db *Set) AscendLessThanPrimary(pivot string,
 	iterator func(key string, value *Item) bool) error {
-	if index == "" {
-		return db.scan(false, false, true, index, pivot, "", iterator)
-	} else {
-		return db.scanSecondary(false, false, true, index, pivot, "", iterator)
-	}
+	return db.scan(false, false, true, "", pivot, "", iterator)
 }
 
 // AscendRange calls the iterator for every item in the database within
@@ -510,15 +549,10 @@ func (db *Set) AscendLessThan(index, pivot string,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the item key.
 // An invalid idx will return an error.
-func (db *Set) AscendRange(index, greaterOrEqual, lessThan string,
+func (db *Set) AscendRangePrimary(greaterOrEqual, lessThan string,
 	iterator func(key string, value *Item) bool) error {
-	if index == "" {
-		return db.scan(
-			false, true, true, index, greaterOrEqual, lessThan, iterator)
-	} else {
-		return db.scanSecondary(
-			false, true, true, index, greaterOrEqual, lessThan, iterator)
-	}
+	return db.scan(
+		false, true, true, "", greaterOrEqual, lessThan, iterator)
 }
 
 // Descend calls the iterator for every item in the database within the range
@@ -527,13 +561,8 @@ func (db *Set) AscendRange(index, greaterOrEqual, lessThan string,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the item key.
 // An invalid idx will return an error.
-func (db *Set) Descend(index string,
-	iterator func(key string, value *Item) bool) error {
-	if index == "" {
-		return db.scan(true, false, false, index, "", "", iterator)
-	} else {
-		return db.scanSecondary(true, false, false, index, "", "", iterator)
-	}
+func (db *Set) DescendPrimary(iterator func(key string, value *Item) bool) error {
+	return db.scan(true, false, false, "", "", "", iterator)
 }
 
 // DescendGreaterThan calls the iterator for every item in the database within
@@ -542,13 +571,9 @@ func (db *Set) Descend(index string,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the item key.
 // An invalid idx will return an error.
-func (db *Set) DescendGreaterThan(index, pivot string,
+func (db *Set) DescendGreaterThanPrimary(pivot string,
 	iterator func(key string, value *Item) bool) error {
-	if index == "" {
-		return db.scan(true, true, false, index, pivot, "", iterator)
-	} else {
-		return db.scanSecondary(true, true, false, index, pivot, "", iterator)
-	}
+	return db.scan(true, true, false, "", pivot, "", iterator)
 }
 
 // DescendLessOrEqual calls the iterator for every item in the database within
@@ -557,13 +582,9 @@ func (db *Set) DescendGreaterThan(index, pivot string,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the item key.
 // An invalid idx will return an error.
-func (db *Set) DescendLessOrEqual(index, pivot string,
+func (db *Set) DescendLessOrEqualPrimary(pivot string,
 	iterator func(key string, value *Item) bool) error {
-	if index == "" {
-		return db.scan(true, false, true, index, pivot, "", iterator)
-	} else {
-		return db.scanSecondary(true, false, true, index, pivot, "", iterator)
-	}
+	return db.scan(true, false, true, "", pivot, "", iterator)
 }
 
 // DescendRange calls the iterator for every item in the database within
@@ -572,17 +593,94 @@ func (db *Set) DescendLessOrEqual(index, pivot string,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the item key.
 // An invalid idx will return an error.
-func (db *Set) DescendRange(index, lessOrEqual, greaterThan string,
+func (db *Set) DescendRangePrimary(lessOrEqual, greaterThan string,
 	iterator func(key string, value *Item) bool) error {
-	if index == "" {
-		return db.scan(
-			true, true, true, index, lessOrEqual, greaterThan, iterator,
-		)
-	} else {
-		return db.scanSecondary(
-			true, true, true, index, lessOrEqual, greaterThan, iterator,
-		)
-	}
+	return db.scan(
+		true, true, true, "", lessOrEqual, greaterThan, iterator,
+	)
+}
+
+// Ascend calls the iterator for every item in the database within the range
+// [first, last], until iterator returns false.
+// When an idx is provided, the results will be ordered by the item values
+// as specified by the less() function of the defined idx.
+// When an idx is not provided, the results will be ordered by the item key.
+// An invalid idx will return an error.
+func (db *Set) Ascend(index string, iterator IndexIterator) error {
+	return db.scanSecondary(false, false, false, index, "", "", iterator)
+}
+
+// AscendGreaterOrEqual calls the iterator for every item in the database within
+// the range [pivot, last], until iterator returns false.
+// When an idx is provided, the results will be ordered by the item values
+// as specified by the less() function of the defined idx.
+// When an idx is not provided, the results will be ordered by the item key.
+// An invalid idx will return an error.
+func (db *Set) AscendGreaterOrEqual(index, pivot string, iterator IndexIterator) error {
+	return db.scanSecondary(false, true, false, index, pivot, "", iterator)
+}
+
+// AscendLessThan calls the iterator for every item in the database within the
+// range [first, pivot), until iterator returns false.
+// When an idx is provided, the results will be ordered by the item values
+// as specified by the less() function of the defined idx.
+// When an idx is not provided, the results will be ordered by the item key.
+// An invalid idx will return an error.
+func (db *Set) AscendLessThan(index, pivot string, iterator IndexIterator) error {
+	return db.scanSecondary(false, false, true, index, pivot, "", iterator)
+}
+
+// AscendRange calls the iterator for every item in the database within
+// the range [greaterOrEqual, lessThan), until iterator returns false.
+// When an idx is provided, the results will be ordered by the item values
+// as specified by the less() function of the defined idx.
+// When an idx is not provided, the results will be ordered by the item key.
+// An invalid idx will return an error.
+func (db *Set) AscendRange(index string, greaterOrEqual, lessThan btree.Item, iterator IndexIterator) error {
+	return db.scanSecondaryIndex(
+		false, true, true, index, greaterOrEqual, lessThan, iterator)
+}
+
+// Descend calls the iterator for every item in the database within the range
+// [last, first], until iterator returns false.
+// When an idx is provided, the results will be ordered by the item values
+// as specified by the less() function of the defined idx.
+// When an idx is not provided, the results will be ordered by the item key.
+// An invalid idx will return an error.
+func (db *Set) Descend(index string, iterator IndexIterator) error {
+	return db.scanSecondary(true, false, false, index, "", "", iterator)
+}
+
+// DescendGreaterThan calls the iterator for every item in the database within
+// the range [last, pivot), until iterator returns false.
+// When an idx is provided, the results will be ordered by the item values
+// as specified by the less() function of the defined idx.
+// When an idx is not provided, the results will be ordered by the item key.
+// An invalid idx will return an error.
+func (db *Set) DescendGreaterThan(index, pivot string, iterator IndexIterator) error {
+	return db.scanSecondary(true, true, false, index, pivot, "", iterator)
+}
+
+// DescendLessOrEqual calls the iterator for every item in the database within
+// the range [pivot, first], until iterator returns false.
+// When an idx is provided, the results will be ordered by the item values
+// as specified by the less() function of the defined idx.
+// When an idx is not provided, the results will be ordered by the item key.
+// An invalid idx will return an error.
+func (db *Set) DescendLessOrEqual(index, pivot string, iterator IndexIterator) error {
+	return db.scanSecondary(true, false, true, index, pivot, "", iterator)
+}
+
+// DescendRange calls the iterator for every item in the database within
+// the range [lessOrEqual, greaterThan), until iterator returns false.
+// When an idx is provided, the results will be ordered by the item values
+// as specified by the less() function of the defined idx.
+// When an idx is not provided, the results will be ordered by the item key.
+// An invalid idx will return an error.
+func (db *Set) DescendRange(index, lessOrEqual, greaterThan string, iterator IndexIterator) error {
+	return db.scanSecondary(
+		true, true, true, index, lessOrEqual, greaterThan, iterator,
+	)
 }
 
 // Rect is helper function that returns a string representation
