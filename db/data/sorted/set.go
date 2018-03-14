@@ -166,7 +166,7 @@ func (db *Set) insert(item *Item) *Item {
 			continue
 		}
 
-		sk := idx.idxr(idx, item)
+		sk := idx.indexer.Index(idx, item)
 		if sk == nil {
 			continue
 		}
@@ -215,6 +215,9 @@ func (db *Set) delete(item *Item) *Item {
 	return pdbi
 }
 
+//
+//
+//
 func (db *Set) Set(key Key, value string, expires int64) (previousValue string,
 	replaced bool, err error) {
 
@@ -272,6 +275,9 @@ func (db *Set) Delete(key Key) (val string, err error) {
 	return item.Value, nil
 }
 
+//
+//
+//
 func (db *Set) scanPrimary(desc, gt, lt bool, start, stop Key,
 	iterator func(value *Item) bool) error {
 	// wrap a btree specific iterator around the user-defined iterator.
@@ -321,6 +327,9 @@ func (db *Set) scanPrimary(desc, gt, lt bool, start, stop Key,
 	return nil
 }
 
+//
+//
+//
 func (db *Set) scanSecondary(desc, gt, lt bool, index string, start, stop Key,
 	iterator func(key IndexItem) bool) error {
 	// wrap a btree specific iterator around the user-defined iterator.
@@ -393,7 +402,10 @@ func (db *Set) Nearby(index, bounds string,
 	}
 	// // wrap a rtree specific iterator around the user-defined iterator.
 	iter := func(item rtree.Item, dist float64) bool {
-		dbi := item.(*RectItem)
+		dbi, ok := item.(*RectItem)
+		if !ok {
+			return true
+		}
 		return iterator(dbi, dbi.item, dist)
 	}
 	idx := db.idxs[index]

@@ -61,25 +61,25 @@ func testNil(t *testing.T, val []byte) {
 }
 
 func isFloat(val []byte) bool {
-	key := Parse(val)
+	key := ParseKeyBytes(val)
 	_, ok := key.(FloatKey)
 	return ok
 }
 
 func isInt(val []byte) bool {
-	key := Parse(val)
+	key := ParseKeyBytes(val)
 	_, ok := key.(IntKey)
 	return ok
 }
 
 func isString(val []byte) bool {
-	key := Parse(val)
+	key := ParseKeyBytes(val)
 	_, ok := key.(StringKey)
 	return ok
 }
 
 func isNil(val []byte) bool {
-	key := Parse(val)
+	key := ParseKeyBytes(val)
 	_, ok := key.(NilKey)
 	return ok
 }

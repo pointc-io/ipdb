@@ -23,7 +23,7 @@ type IndexItem interface {
 	//IndexItemBase(idx *index, item *Item) IndexItem
 
 	//IsComposite() bool
-	//Parse(raw string) IndexItem
+	//ParseKeyBytes(raw string) IndexItem
 	//ParseComposite(raw ... string) IndexItem
 	//
 	////ParseBytes(raw []byte) IndexItem
@@ -218,5 +218,19 @@ type FloatItem struct {
 
 // btree.Item
 func (k *FloatItem) Less(than btree.Item, ctx interface{}) bool {
+	return k.Key.LessThanItem(than, k.item)
+}
+
+
+//
+//
+//
+type FloatDescItem struct {
+	IndexItemBase
+	Key FloatDescKey
+}
+
+// btree.Item
+func (k *FloatDescItem) Less(than btree.Item, ctx interface{}) bool {
 	return k.Key.LessThanItem(than, k.item)
 }

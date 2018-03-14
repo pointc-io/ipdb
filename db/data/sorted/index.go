@@ -2,19 +2,18 @@ package sorted
 
 import (
 	"io"
-	"strings"
 	"github.com/armon/go-radix"
 	"github.com/pointc-io/ipdb/db/data/btree"
 	"github.com/pointc-io/ipdb/db/data/rtree"
 )
 
-// IndexOptions provides an idx with additional features or
-// alternate functionality.
-type IndexOptions struct {
-	// CaseInsensitiveKeyMatching allow for case-insensitive
-	// matching on keys when setting key/values.
-	CaseInsensitiveKeyMatching bool
+type Index interface {
+	Memory() uint64
+
+	Length() uint64
 }
+
+type IndexIterator func(key IndexItem) bool
 
 type IndexType uint8
 
@@ -35,11 +34,10 @@ type SetIndex struct {
 	name    string // name of the idx
 	pattern string // a required key pattern
 
-	length int
+	length uint64
 	memory uint64
 
-	opts IndexOptions // idx options
-	idxr indexFactory
+	indexer Indexer
 }
 
 func (i *SetIndex) Length() int {
@@ -79,32 +77,8 @@ func (i *SetIndex) Restore(writer io.Writer) error {
 
 // match matches the pattern to the key
 func (idx *SetIndex) match(key Key) bool {
-	//if idx.opts.CaseInsensitiveKeyMatching {
-	//	for i := 0; i < len(key); i++ {
-	//		if key[i] >= 'A' && key[i] <= 'Z' {
-	//			key = strings.ToLower(key)
-	//			break
-	//		}
-	//	}
-	//}
 	return key.Match(idx.pattern)
 }
-
-//// match matches the pattern to the key
-//func (idx *index) match(key string) bool {
-//	if idx.pattern == "*" {
-//		return true
-//	}
-//	if idx.opts.CaseInsensitiveKeyMatching {
-//		for i := 0; i < len(key); i++ {
-//			if key[i] >= 'A' && key[i] <= 'Z' {
-//				key = strings.ToLower(key)
-//				break
-//			}
-//		}
-//	}
-//	return match.Match(key, idx.pattern)
-//}
 
 // clearCopy creates a copy of the idx, but with an empty dataset.
 func (idx *SetIndex) clearCopy() *SetIndex {
@@ -113,7 +87,7 @@ func (idx *SetIndex) clearCopy() *SetIndex {
 		name:    idx.name,
 		pattern: idx.pattern,
 		db:      idx.db,
-		opts:    idx.opts,
+		indexer: idx.indexer,
 	}
 	switch idx.t {
 	case BTree:
@@ -154,7 +128,7 @@ func (idx *SetIndex) rebuild() {
 		switch idx.t {
 		case BTree:
 			if sk == nil {
-				sk = idx.idxr(idx, dbi)
+				sk = idx.indexer.Index(idx, dbi)
 				if sk != nil {
 					dbi.indexes = append(dbi.indexes, sk)
 				}
@@ -170,7 +144,7 @@ func (idx *SetIndex) rebuild() {
 
 		case RTree:
 			if sk == nil {
-				sk = idx.idxr(idx, dbi)
+				sk = idx.indexer.Index(idx, dbi)
 				if sk != nil {
 					dbi.indexes = append(dbi.indexes, sk)
 				}
@@ -203,15 +177,8 @@ func (idx *SetIndex) rebuild() {
 // less function to handle the content format and comparison.
 // There are some default less function that can be used such as
 // IndexString, IndexBinary, etc.
-func (db *Set) CreateIndexOld(name, pattern string) error {
-	return db.createIndex(BTree, name, pattern, nil)
-}
-
-// CreateIndexOptions is the same as CreateIndex except that it allows
-// for additional options.
-func (db *Set) CreateIndexOptions(name, pattern string,
-	opts *IndexOptions) error {
-	return db.createIndex(BTree, name, pattern, opts)
+func (db *Set) CreateIndex(name, pattern string, indexer Indexer) error {
+	return db.createIndex(BTree, name, pattern, indexer)
 }
 
 // CreateSpatialIndex builds a new idx and populates it with items.
@@ -229,112 +196,11 @@ func (db *Set) CreateIndexOptions(name, pattern string,
 // The IndexRect is a default function that can be used for the rect
 // parameter.
 func (db *Set) CreateSpatialIndex(name, pattern string, indexer Indexer) error {
-	return db.createSecondary(RTree, name, pattern, indexer)
-	//return db.createSecondaryIndex(RTree, name, pattern, spatialIndex(), nil)
-}
-
-
-// createIndex is called by CreateIndex() and CreateSpatialIndex()
-func (db *Set) createIndex(idxType IndexType, name, pattern string, opts *IndexOptions) error {
-	if name == "" {
-		// cannot create an idx without a name.
-		// an empty name idx is designated for the main "keys" tree.
-		return ErrIndexExists
-	}
-	// check if an idx with that name already exists.
-	if _, ok := db.idxs[name]; ok {
-		// idx with name already exists. error.
-		return ErrIndexExists
-	}
-	var sopts IndexOptions
-	if opts != nil {
-		sopts = *opts
-	}
-	if sopts.CaseInsensitiveKeyMatching {
-		pattern = strings.ToLower(pattern)
-	}
-	// intialize new idx
-	idx := &SetIndex{
-		t:       idxType,
-		name:    name,
-		pattern: pattern,
-		db:      db,
-		opts:    sopts,
-	}
-	idx.rebuild()
-	// save the idx
-	db.idxs[name] = idx
-
-	return nil
-}
-
-//func (db *Set) CreateIndexM(name, pattern string, fields ... projector) error {
-//	return db.createSecondaryIndex(BTree, name, pattern, compositeIndex(fields...), nil)
-//}
-//
-//func (db *Set) CreateJSONIndex(name, pattern string, path string) error {
-//	return db.createSecondaryIndex(BTree, name, pattern, jsonWildcardIndex(jsonWildcardProjector(path)), nil)
-//}
-//
-//func (db *Set) CreateJSONSpatialIndex(name, pattern string, path string) error {
-//	return db.createSecondaryIndex(RTree, name, pattern, jsonSpatialIndex(jsonRect(path)), nil)
-//}
-//
-//func (db *Set) CreateJSONNumberIndex(name, pattern string, path string) error {
-//	return db.createSecondaryIndex(BTree, name, pattern, jsonFloatIndex(jsonFloatProjector(path)), nil)
-//}
-//
-//func (db *Set) CreateJSONStringIndex(name, pattern string, path string) error {
-//	return db.createSecondaryIndex(BTree, name, pattern, jsonStringIndex(jsonStringProjector(path)), nil)
-//}
-
-func (db *Set) CreateIndex(name, pattern string, indexer Indexer) error {
-	return db.createSecondary(BTree, name, pattern, indexer)
+	return db.createIndex(RTree, name, pattern, indexer)
 }
 
 // createIndex is called by CreateIndex() and CreateSpatialIndex()
-func (db *Set) createSecondaryIndex(idxType IndexType, name string, pattern string,
-	factory indexFactory,
-	opts *IndexOptions,
-) error {
-	if name == "" {
-		// cannot create an idx without a name.
-		// an empty name idx is designated for the main "keys" tree.
-		return ErrIndexExists
-	}
-	// check if an idx with that name already exists.
-	if _, ok := db.idxs[name]; ok {
-		// idx with name already exists. error.
-		return ErrIndexExists
-	}
-
-	var sopts IndexOptions
-	if opts != nil {
-		sopts = *opts
-	}
-	if sopts.CaseInsensitiveKeyMatching {
-		pattern = strings.ToLower(pattern)
-	}
-	// intialize new idx
-	idx := &SetIndex{
-		t:       idxType,
-		name:    name,
-		pattern: pattern,
-		//less:    less,
-		//rect:    rect,
-		db:   db,
-		opts: sopts,
-		idxr: factory,
-	}
-	// save the idx
-	db.insertIndex(idx)
-
-	idx.rebuild()
-	return nil
-}
-
-// createIndex is called by CreateIndex() and CreateSpatialIndex()
-func (db *Set) createSecondary(
+func (db *Set) createIndex(
 	idxType IndexType,
 	name string,
 	pattern string,
@@ -351,21 +217,15 @@ func (db *Set) createSecondary(
 		return ErrIndexExists
 	}
 
-	var sopts IndexOptions
-	if sopts.CaseInsensitiveKeyMatching {
-		pattern = strings.ToLower(pattern)
-	}
 	// intialize new idx
 	idx := &SetIndex{
 		t:       idxType,
 		name:    name,
 		pattern: pattern,
-		//less:    less,
-		//rect:    rect,
-		db:   db,
-		opts: sopts,
-		idxr: indexer.Index,
+		db:      db,
+		indexer: indexer,
 	}
+
 	// save the idx
 	db.insertIndex(idx)
 

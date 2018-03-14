@@ -1,8 +1,21 @@
 package sorted
 
 import (
-	"github.com/pointc-io/ipdb/db/data"
 	"github.com/pointc-io/ipdb/codec/gjson"
+)
+
+type IndexOpts int
+
+const (
+	IncludeString IndexOpts = 1 << iota
+	IncludeInt
+	IncludeFloat
+	IncludeBool
+	IncludeRect
+	IncludeNil
+	IncludeAny
+	ForceInt
+	SortDesc
 )
 
 // Project as single key from a value
@@ -14,6 +27,9 @@ type Indexer interface {
 	Index(index *SetIndex, item *Item) IndexItem
 }
 
+//
+//
+//
 func ValueProjector(item *Item) Key {
 	l := len(item.Value)
 	if l == 0 {
@@ -23,10 +39,20 @@ func ValueProjector(item *Item) Key {
 	if item.Value[0] == '{' {
 		return StringKey(item.Value)
 	} else {
-		return ParseRaw(item.Value)
+		return ParseKey(item.Value)
 	}
 }
 
+//
+//
+//
+func RectProjector(item *Item) Key {
+	return ParseRect(item.Value)
+}
+
+//
+//
+//
 func JSONProjector(path string) KeyProjector {
 	return func(item *Item) Key {
 		result := gjson.Get(item.Value, path)
@@ -49,6 +75,9 @@ func JSONProjector(path string) KeyProjector {
 	}
 }
 
+//
+//
+//
 func JSONRectProjector(path string) KeyProjector {
 	return func(item *Item) Key {
 		result := gjson.Get(item.Value, path)
@@ -73,62 +102,88 @@ func JSONRectProjector(path string) KeyProjector {
 	}
 }
 
-func JSONIndexer(path string, kind data.DataType, desc bool) *IndexField {
-	return NewIndexField(path, kind, desc, JSONProjector(path))
+//
+//
+//
+func JSONIndexer(path string, opts IndexOpts) *IndexField {
+	return NewIndexer(path, opts, JSONProjector(path))
 }
 
-func JSONSpatialIndexer(path string, kind data.DataType, desc bool) *IndexField {
-	return NewIndexField(path, kind, desc, JSONRectProjector(path))
+//
+//
+//
+func IndexString(desc bool) IndexOpts {
+	o := IncludeString
+	if desc {
+		o |= SortDesc
+	}
+	return o
 }
 
-func NewIndexField(
+//
+//
+//
+func IndexInt(desc bool) IndexOpts {
+	o := IncludeInt | IncludeFloat | ForceInt
+	if desc {
+		o |= SortDesc
+	}
+	return o
+}
+
+func IndexFloat(desc bool) IndexOpts {
+	o := IncludeInt | IncludeFloat
+	if desc {
+		o |= SortDesc
+	}
+	return o
+}
+
+//
+//
+//
+func IndexAny(desc bool) IndexOpts {
+	o := IncludeInt | IncludeFloat | IncludeString | IncludeNil
+	if desc {
+		o |= SortDesc
+	}
+	return o
+}
+
+//
+//
+//
+func IndexSpatial() IndexOpts {
+	return IncludeRect
+}
+
+//
+//
+//
+func SpatialIndexer() *IndexField {
+	return NewIndexer("", IndexSpatial(), RectProjector)
+}
+
+//
+//
+//
+func JSONSpatialIndexer(path string) *IndexField {
+	return NewIndexer(path, IndexSpatial(), JSONRectProjector(path))
+}
+
+//
+//
+//
+func NewIndexer(
 	name string,
-	kind data.DataType,
-	desc bool,
+	opts IndexOpts,
 	projector KeyProjector,
 ) *IndexField {
-	f := &IndexField{
+	return &IndexField{
 		name:      name,
-		kind:      kind,
-		desc:      desc,
+		opts:      opts,
 		projector: projector,
 	}
-
-	switch kind {
-	case data.Int:
-		f.forceInt = true
-		f.iint = true
-		f.ifloat = true
-		f.ibool = false
-		f.inil = false
-		f.istr = false
-
-	case data.Float:
-		f.forceInt = false
-		f.iint = true
-		f.ifloat = true
-		f.ibool = false
-		f.inil = false
-		f.istr = false
-
-	case data.String:
-		f.forceInt = false
-		f.iint = false
-		f.ifloat = false
-		f.ibool = false
-		f.inil = true
-		f.istr = true
-
-	default:
-		f.forceInt = false
-		f.iint = true
-		f.ifloat = true
-		f.ibool = true
-		f.inil = true
-		f.istr = true
-	}
-
-	return f
 }
 
 type CompositeIndex struct {
@@ -220,22 +275,35 @@ func (i *CompositeIndex) Index(index *SetIndex, item *Item) IndexItem {
 
 // Meta data to describe the behavior of the index dimension
 type IndexField struct {
-	//btree bool
-	//rtree bool
-	//radtree bool
-	name     string
-	field    string
-	length   int
-	kind     data.DataType
-	desc     bool
-	inil     bool
-	iint     bool
-	ifloat   bool
-	istr     bool
-	ibool    bool
-	forceInt bool
-
+	name      string
+	length    int
+	opts      IndexOpts
 	projector KeyProjector
+}
+
+func (i *IndexField) Parse(buf []byte) Key {
+	switch key := ParseKeyBytes(buf).(type) {
+	case IntKey:
+		if i.opts & IncludeInt != 0 {
+			return key
+		} else {
+			return SkipKey
+		}
+	case StringKey:
+		if i.opts & IncludeString != 0 {
+			return key
+		} else {
+			return SkipKey
+		}
+	case FloatKey:
+		if i.opts & IncludeFloat != 0 {
+			return key
+		} else {
+			return SkipKey
+		}
+	default:
+		return key
+	}
 }
 
 func (i *IndexField) Fields() int {
@@ -253,39 +321,40 @@ func (i *IndexField) FieldAt(index int) *IndexField {
 func (i *IndexField) Key(index *SetIndex, item *Item) Key {
 	k := i.projector(item)
 	if k == nil {
-		if i.inil {
-			return Nil
-		} else {
-			return SkipKey
-		}
+		return SkipKey
 	}
 
 	switch key := k.(type) {
 	case IntKey:
-		if !i.iint {
+		if i.opts&IncludeInt != 0 {
+			return key
+		} else {
 			return SkipKey
 		}
 	case FloatKey:
-		if !i.ifloat {
-			return nil
-		} else {
-			if i.forceInt {
-				k = IntKey(key)
+		if i.opts&IncludeFloat != 0 {
+			if i.opts&ForceInt != 0 {
+				return IntKey(key)
+			} else {
+				return key
 			}
+		} else {
+			return SkipKey
 		}
 	case StringKey:
-		if !i.istr {
-			return SkipKey
-		} else {
+		if i.opts&IncludeString != 0 {
 			// Truncate if necessary
 			if i.length > 0 && len(key) > i.length {
 				key = key[:i.length]
 				k = key
 			}
+			return k
+		} else {
+			return SkipKey
 		}
 	case NilKey:
-		if i.inil {
-			return k
+		if i.opts&IncludeNil != 0 {
+			return Nil
 		} else {
 			return SkipKey
 		}
@@ -295,7 +364,10 @@ func (i *IndexField) Key(index *SetIndex, item *Item) Key {
 }
 
 func (i *IndexField) Index(index *SetIndex, item *Item) IndexItem {
+	// Project a key from the item
 	val := i.projector(item)
+
+	// Should we skip?
 	if val == SkipKey {
 		return nil
 	}
@@ -310,9 +382,7 @@ func (i *IndexField) Index(index *SetIndex, item *Item) IndexItem {
 			Key: key,
 		}
 	case IntKey:
-		if !i.iint {
-			return nil
-		} else {
+		if i.opts&IncludeInt != 0 {
 			return &IntItem{
 				IndexItemBase: IndexItemBase{
 					idx:  index,
@@ -320,12 +390,12 @@ func (i *IndexField) Index(index *SetIndex, item *Item) IndexItem {
 				},
 				Key: key,
 			}
+		} else {
+			return nil
 		}
 	case FloatKey:
-		if !i.ifloat {
-			return nil
-		} else {
-			if i.forceInt {
+		if i.opts&IncludeFloat != 0 {
+			if i.opts&ForceInt != 0 {
 				return &IntItem{
 					IndexItemBase: IndexItemBase{
 						idx:  index,
@@ -334,6 +404,15 @@ func (i *IndexField) Index(index *SetIndex, item *Item) IndexItem {
 					Key: IntKey(key),
 				}
 			} else {
+				if i.opts&SortDesc != 0 {
+					return &FloatDescItem{
+						IndexItemBase: IndexItemBase{
+							idx:  index,
+							item: item,
+						},
+						Key: FloatDescKey(key),
+					}
+				}
 				return &FloatItem{
 					IndexItemBase: IndexItemBase{
 						idx:  index,
@@ -342,11 +421,11 @@ func (i *IndexField) Index(index *SetIndex, item *Item) IndexItem {
 					Key: key,
 				}
 			}
+		} else {
+			return nil
 		}
 	case StringKey:
-		if !i.istr {
-			return nil
-		} else {
+		if i.opts&IncludeString != 0 {
 			// Truncate if necessary
 			if i.length > 0 && len(key) > i.length {
 				key = key[:i.length]
@@ -358,9 +437,12 @@ func (i *IndexField) Index(index *SetIndex, item *Item) IndexItem {
 				},
 				Key: key,
 			}
+		} else {
+			return nil
 		}
+
 	case NilKey:
-		if i.inil {
+		if i.opts&IncludeNil != 0 {
 			return &AnyItem{
 				IndexItemBase: IndexItemBase{
 					idx:  index,
@@ -372,12 +454,16 @@ func (i *IndexField) Index(index *SetIndex, item *Item) IndexItem {
 			return nil
 		}
 	case Rect:
-		return &RectItem{
-			IndexItemBase: IndexItemBase{
-				idx:  index,
-				item: item,
-			},
-			Key: key,
+		if i.opts&IncludeRect != 0 {
+			return &RectItem{
+				IndexItemBase: IndexItemBase{
+					idx:  index,
+					item: item,
+				},
+				Key: key,
+			}
+		} else {
+			return nil
 		}
 	}
 }

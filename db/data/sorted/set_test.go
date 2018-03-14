@@ -3,20 +3,13 @@ package sorted
 import (
 	"testing"
 	"fmt"
-	"strconv"
 	"github.com/pointc-io/ipdb/codec/gjson"
 	"unsafe"
-	"github.com/pointc-io/ipdb/db/data"
 )
 
 func TestNew(t *testing.T) {
-	set := New()
-
-	set.Set(StringKey("1"), "bar", 0)
-
-	val, _ := set.Get(StringKey("1"))
-
-	fmt.Println(string(val))
+	opts := IncludeString | IncludeInt
+	fmt.Println(opts & ForceInt)
 }
 
 func TestPoint(t *testing.T) {
@@ -30,7 +23,7 @@ func TestSpatial(t *testing.T) {
 
 	//db.CreateJSONStringIndex("last_name", "p:*", "name.last")
 	//db.CreateJSONIndex("last_name", "p:*", "name.last")
-	db.CreateSpatialIndex("fleet", "fleet:*", JSONIndexer("age", data.Rect, false))
+	db.CreateSpatialIndex("fleet", "fleet:*", JSONSpatialIndexer("age"))
 	//db.CreateSpatialIndex("loc", "p:*", "age")
 
 	db.Set(StringKey("fleet:0:pos"), "[-115.567 33.532]", 0)
@@ -46,10 +39,10 @@ func TestSpatial(t *testing.T) {
 func TestIndexer(t *testing.T) {
 	db := New()
 
-	//indexer := NewIndexField("name.last", data.String, false, JSONProjector("name.last"))
+	//indexer := NewIndexer("name.last", data.String, false, JSONProjector("name.last"))
 	//db.CreateIndex("last_name", "p:*", indexer)
 
-	db.CreateSpatialIndex("fleet", "p:*", JSONSpatialIndexer("location", data.Rect, false))
+	db.CreateSpatialIndex("fleet", "p:*", JSONSpatialIndexer("location"))
 
 	//db.CreateJSONStringIndex("last_name", "p:*", "name.last")
 	//db.CreateJSONIndex("last_name", "p:*", "name.last")
@@ -106,11 +99,11 @@ func TestSecondary(t *testing.T) {
 	db.CreateIndex(
 		"last_name",
 		"*",
-		JSONIndexer("name.last", data.String, false))
+		JSONIndexer("name.last", IncludeString))
 	db.CreateIndex(
 		"age",
 		"*",
-		JSONIndexer("age", data.Int, false))
+		JSONIndexer("age", IncludeInt|IncludeFloat))
 
 	db.Set(StringKey("p:10"), `{"name":{"first":"Don","last":"Johnson"},"age":38}`, 0)
 	db.Set(StringKey("p:1"), `{"name":{"first":"Tom","last":"Johnson"},"age":38}`, 0)
@@ -152,21 +145,24 @@ func TestSecondary(t *testing.T) {
 
 	fmt.Println()
 	fmt.Println("Order by age range 30-50")
-	db.AscendRange("age", FloatKey(30), FloatKey(52), func(key IndexItem) bool {
+	db.Ascend("age", func(key IndexItem) bool {
 		//db.AscendRange("age", &FloatItem{key: 30}, &FloatItem{key: 51}, func(key IndexItem) bool {
 		res := gjson.Get(key.Item().Value, "name.last")
 		age := gjson.Get(key.Item().Value, "age")
 		fmt.Printf("%s: %s\n", age.Raw, res.Raw)
 		return true
 	})
+	//db.AscendRange("age", FloatKey(30), FloatKey(52), func(key IndexItem) bool {
+	//	//db.AscendRange("age", &FloatItem{key: 30}, &FloatItem{key: 51}, func(key IndexItem) bool {
+	//	res := gjson.Get(key.Item().Value, "name.last")
+	//	age := gjson.Get(key.Item().Value, "age")
+	//	fmt.Printf("%s: %s\n", age.Raw, res.Raw)
+	//	return true
+	//})
 }
 
 func TestDesc(t *testing.T) {
 	db := New()
-
-	db.CreateIndexOld("last_name", "p:*")
-	db.CreateIndexOld("age", "p:*")
-	db.CreateIndexOld("age2", "a:*")
 
 	//db.createSecondaryIndex("lastname", "p:*", &jsonKeyFactory{path: "name.last"}, nil)
 
@@ -190,7 +186,6 @@ func TestDesc(t *testing.T) {
 	fmt.Println(item)
 
 	db.DropIndex("age2")
-	db.CreateIndexOld("age2", "a:*")
 
 	fmt.Println("Order by last name")
 	db.Descend("last_name", func(key IndexItem) bool {
@@ -222,24 +217,4 @@ func TestDesc(t *testing.T) {
 }
 
 func BenchmarkIndexJSON(b *testing.B) {
-	db := New()
-	db.CreateIndexOld("last_name", "p:*")
-	db.CreateIndexOld("age", "p:*")
-	db.CreateIndexOld("age2", "a:*")
-}
-
-func BenchmarkTx_Set(b *testing.B) {
-	set := New()
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		set.Set(StringKey(strconv.Itoa(i)), "bar", 0)
-		//tx, err := set.Begin(true)
-		//if err != nil {
-		//	b.Fatal(err)
-		//}
-		//tx.Set(strconv.Itoa(i), "bar", 0)
-		//tx.Commit()
-	}
 }

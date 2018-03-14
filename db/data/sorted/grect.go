@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tidwall/gjson"
+	"github.com/pointc-io/ipdb/codec/gjson"
 	"github.com/pointc-io/ipdb/db/data"
 	"github.com/pointc-io/ipdb/db/data/btree"
 )
@@ -296,7 +296,7 @@ next:
 		}
 	}
 end_early:
-	// just balance the parens
+// just balance the parens
 	for ; i < len(s); i++ {
 		if s[i] == '(' {
 			depth++
