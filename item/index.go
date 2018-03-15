@@ -2,9 +2,11 @@ package item
 
 import (
 	"io"
+
 	"github.com/armon/go-radix"
-	"github.com/pointc-io/ipdb/index/btree"
-	"github.com/pointc-io/ipdb/index/rtree"
+	"github.com/pointc-io/sliced"
+	"github.com/pointc-io/sliced/index/btree"
+	"github.com/pointc-io/sliced/index/rtree"
 )
 
 const btreeDegrees = 32
@@ -208,12 +210,12 @@ func (db *Set) createIndex(
 	if name == "" {
 		// cannot create an idx without a name.
 		// an empty name idx is designated for the main "keys" tree.
-		return ErrIndexExists
+		return sliced.ErrIndexExists
 	}
 	// check if an idx with that name already exists.
 	if _, ok := db.idxs[name]; ok {
 		// idx with name already exists. error.
-		return ErrIndexExists
+		return sliced.ErrIndexExists
 	}
 
 	// intialize new idx
@@ -236,11 +238,11 @@ func (db *Set) createIndex(
 func (db *Set) DropIndex(name string) error {
 	if name == "" {
 		// cannot drop the default "keys" idx
-		return ErrInvalidOperation
+		return sliced.ErrInvalidOperation
 	}
 	idx, ok := db.idxs[name]
 	if !ok {
-		return ErrNotFound
+		return sliced.ErrNotFound
 	}
 
 	db.removeIndex(idx)

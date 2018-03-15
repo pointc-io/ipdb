@@ -2,8 +2,8 @@ package server
 
 import (
 	"sync"
-	"github.com/pointc-io/ipdb/evio"
-	"github.com/pointc-io/ipdb/command"
+	"github.com/pointc-io/sliced/evio"
+	"github.com/pointc-io/sliced/command"
 )
 
 var maxCommandBacklog = 10000

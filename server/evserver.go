@@ -1,20 +1,20 @@
 package server
 
 import (
-	"sync"
-	"time"
 	"fmt"
 	"net"
 	"runtime"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/rcrowley/go-metrics"
 
-	"github.com/pointc-io/ipdb"
-	"github.com/pointc-io/ipdb/redcon"
-	"github.com/pointc-io/ipdb/evio"
-	"github.com/pointc-io/ipdb/service"
-	"strings"
-	"github.com/pointc-io/ipdb/command"
+	"github.com/pointc-io/sliced"
+	"github.com/pointc-io/sliced/command"
+	"github.com/pointc-io/sliced/evio"
+	"github.com/pointc-io/sliced/redcon"
+	"github.com/pointc-io/sliced/service"
 )
 
 var notImplementedHandler = func(out []byte, action evio.Action, conn *Conn, packet []byte, args [][]byte) ([]byte, evio.Action) {

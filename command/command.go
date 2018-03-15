@@ -1,7 +1,7 @@
 package command
 
 import (
-	"github.com/pointc-io/ipdb/redcon"
+	"github.com/pointc-io/sliced/redcon"
 )
 
 var (

@@ -1,10 +1,11 @@
 package item
 
 import (
-	"testing"
 	"fmt"
-	"github.com/pointc-io/ipdb/codec/gjson"
+	"testing"
 	"unsafe"
+
+	"github.com/pointc-io/sliced/codec/gjson"
 )
 
 func TestNew(t *testing.T) {
@@ -23,14 +24,14 @@ func TestSpatial(t *testing.T) {
 
 	//db.CreateJSONStringIndex("last_name", "p:*", "name.last")
 	//db.CreateJSONIndex("last_name", "p:*", "name.last")
-	db.CreateSpatialIndex("fleet", "fleet:*", JSONSpatialIndexer("age"))
+	db.CreateSpatialIndex("fleet", "fleet:*", SpatialIndexer())
 	//db.CreateSpatialIndex("loc", "p:*", "age")
 
 	db.Set(StringKey("fleet:0:pos"), "[-115.567 33.532]", 0)
 	db.Set(StringKey("fleet:1:pos"), "[-116.671 35.735]", 0)
 	db.Set(StringKey("fleet:2:pos"), "[-113.902 31.234]", 0)
 
-	db.Nearby("fleet", "[-113 33]", func(key *RectItem, val *Item, dist float64) bool {
+	db.Nearby("fleet", "[-113 33]", func(key *RectItem, val *ValueItem, dist float64) bool {
 		fmt.Println(val.Key, val.Value, dist)
 		return true
 	})
@@ -53,7 +54,7 @@ func TestIndexer(t *testing.T) {
 	db.Set(StringKey("p:2"), `{"name":{"first":"Janet","last":"Prichard"},"age":47, "location":[-116.671 35.735]}`, 0)
 	db.Set(StringKey("p:3"), `{"name":{"first":"Carol","last":"Anderson"},"age":52, "location":[-113.902 31.234]}`, 0)
 
-	db.Nearby("fleet", "[-113 33]", func(key *RectItem, value *Item, dist float64) bool {
+	db.Nearby("fleet", "[-113 33]", func(key *RectItem, value *ValueItem, dist float64) bool {
 		fmt.Println(value.Key, value.Value, dist)
 		return true
 	})
@@ -127,7 +128,7 @@ func TestSecondary(t *testing.T) {
 	//	return true
 	//})
 	fmt.Println("Table Scan")
-	db.AscendPrimary(func(item *Item) bool {
+	db.AscendPrimary(func(item *ValueItem) bool {
 		res := gjson.Get(item.Value, "name.last")
 		age := gjson.Get(item.Value, "age")
 		fmt.Printf("%s %s: %s\n", item.Key, age.Raw, res.Raw)
@@ -136,19 +137,19 @@ func TestSecondary(t *testing.T) {
 
 	fmt.Println()
 	fmt.Println("Order by age range 30-50")
-	db.Ascend("last_name", func(key Item) bool {
-		res := gjson.Get(key.Item().Value, "name.last")
-		age := gjson.Get(key.Item().Value, "age")
+	db.Ascend("last_name", func(key IndexItem) bool {
+		res := gjson.Get(key.Value().Value, "name.last")
+		age := gjson.Get(key.Value().Value, "age")
 		fmt.Printf("%s: %s\n", age.Raw, res.Raw)
 		return true
 	})
 
 	fmt.Println()
 	fmt.Println("Order by age range 30-50")
-	db.Ascend("age", func(key Item) bool {
+	db.Ascend("age", func(key IndexItem) bool {
 		//db.AscendRange("age", &FloatItem{key: 30}, &FloatItem{key: 51}, func(key Value) bool {
-		res := gjson.Get(key.Item().Value, "name.last")
-		age := gjson.Get(key.Item().Value, "age")
+		res := gjson.Get(key.Value().Value, "name.last")
+		age := gjson.Get(key.Value().Value, "age")
 		fmt.Printf("%s: %s\n", age.Raw, res.Raw)
 		return true
 	})
@@ -188,13 +189,13 @@ func TestDesc(t *testing.T) {
 	db.DropIndex("age2")
 
 	fmt.Println("Order by last name")
-	db.Descend("last_name", func(key Item) bool {
-		fmt.Printf("%s: %s\n", key, key.Item().Value)
+	db.Descend("last_name", func(key IndexItem) bool {
+		fmt.Printf("%s: %s\n", key, key.Value().Value)
 		return true
 	})
 	fmt.Println("Order by age")
-	db.Ascend("age", func(key Item) bool {
-		fmt.Printf("%s: %s\n", key, key.Item().Value)
+	db.Ascend("age", func(key IndexItem) bool {
+		fmt.Printf("%s: %s\n", key, key.Value().Value)
 		return true
 	})
 	fmt.Println("Order by age range 30-50")
@@ -210,8 +211,8 @@ func TestDesc(t *testing.T) {
 	//})
 
 	fmt.Println("Order by age")
-	db.Ascend("age2", func(key Item) bool {
-		fmt.Printf("%s: %s\n", key, key.Item().Value)
+	db.Ascend("age2", func(key IndexItem) bool {
+		fmt.Printf("%s: %s\n", key, key.Value().Value)
 		return true
 	})
 }

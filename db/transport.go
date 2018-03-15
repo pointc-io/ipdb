@@ -15,9 +15,9 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/garyburd/redigo/redis"
-	"github.com/pointc-io/ipdb/redcon"
-	"github.com/pointc-io/ipdb/service"
-	cmd "github.com/pointc-io/ipdb/command"
+	"github.com/pointc-io/sliced/redcon"
+	"github.com/pointc-io/sliced/service"
+	cmd "github.com/pointc-io/sliced/command"
 )
 
 const (

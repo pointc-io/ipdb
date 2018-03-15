@@ -1,10 +1,10 @@
 package value
 
 import (
-	"github.com/pointc-io/ipdb/service"
+	"github.com/pointc-io/sliced/service"
 	"io"
 	"sync"
-	"github.com/pointc-io/ipdb/command"
+	"github.com/pointc-io/sliced/command"
 )
 
 type StructureType uint8

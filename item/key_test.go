@@ -1,8 +1,8 @@
 package item
 
 import (
-	"testing"
 	"fmt"
+	"testing"
 )
 
 func TestParse(t *testing.T) {

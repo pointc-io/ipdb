@@ -1,9 +1,9 @@
 package action
 
 import (
-	"github.com/pointc-io/ipdb"
-	"github.com/pointc-io/ipdb/redcon"
-	"github.com/pointc-io/ipdb/redcon/ev"
+	"github.com/pointc-io/sliced"
+	"github.com/pointc-io/sliced/redcon"
+	"github.com/pointc-io/sliced/redcon/ev"
 )
 
 func VERSION() evred.Command {

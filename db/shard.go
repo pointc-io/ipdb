@@ -16,16 +16,16 @@ import (
 	"errors"
 
 	"github.com/hashicorp/raft"
-	"github.com/pointc-io/ipdb/db/store"
-	"github.com/pointc-io/ipdb/db/buntdb"
-	"github.com/pointc-io/ipdb/service"
-	"github.com/pointc-io/ipdb"
+	"github.com/pointc-io/sliced/db/store"
+	"github.com/pointc-io/sliced/db/buntdb"
+	"github.com/pointc-io/sliced/service"
+	"github.com/pointc-io/sliced"
 	"log"
 	"bytes"
 	"github.com/rs/zerolog"
 	"strings"
-	"github.com/pointc-io/ipdb/item"
-	cmd "github.com/pointc-io/ipdb/command"
+	"github.com/pointc-io/sliced/item"
+	cmd "github.com/pointc-io/sliced/command"
 )
 
 const (

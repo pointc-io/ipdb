@@ -1,8 +1,8 @@
 package action
 
 import (
-	"github.com/pointc-io/ipdb/redcon"
-	"github.com/pointc-io/ipdb/redcon/ev"
+	"github.com/pointc-io/sliced/redcon"
+	"github.com/pointc-io/sliced/redcon/ev"
 )
 
 func GET(args [][]byte) evred.Command {

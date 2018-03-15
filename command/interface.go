@@ -1,8 +1,8 @@
 package command
 
 import (
-	"github.com/pointc-io/ipdb/redcon"
-	"github.com/pointc-io/ipdb/item"
+	"github.com/pointc-io/sliced/redcon"
+	"github.com/pointc-io/sliced/item"
 )
 
 type Durability int

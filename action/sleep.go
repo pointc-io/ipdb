@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pointc-io/ipdb/redcon"
-	"github.com/pointc-io/ipdb/redcon/ev"
+	"github.com/pointc-io/sliced/redcon"
+	"github.com/pointc-io/sliced/redcon/ev"
 )
 
 func SLEEP(args [][]byte) evred.Command {

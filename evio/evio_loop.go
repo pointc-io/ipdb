@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pointc-io/ipdb/evio/internal"
+	"github.com/pointc-io/sliced/evio/internal"
 )
 
 var (

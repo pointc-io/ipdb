@@ -12,14 +12,14 @@ import (
 
 	"github.com/hashicorp/raft"
 	
-	"github.com/pointc-io/ipdb"
+	"github.com/pointc-io/sliced"
 
-	"github.com/pointc-io/ipdb/index/btree"
-	"github.com/pointc-io/ipdb/db/buntdb"
-	"github.com/pointc-io/ipdb/redcon"
-	"github.com/pointc-io/ipdb/service"
-	"github.com/pointc-io/ipdb/item"
-	cmd "github.com/pointc-io/ipdb/command"
+	"github.com/pointc-io/sliced/index/btree"
+	"github.com/pointc-io/sliced/db/buntdb"
+	"github.com/pointc-io/sliced/redcon"
+	"github.com/pointc-io/sliced/service"
+	"github.com/pointc-io/sliced/item"
+	cmd "github.com/pointc-io/sliced/command"
 )
 
 const (

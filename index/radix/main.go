@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/armon/go-radix"
 	"fmt"
-	"github.com/pointc-io/ipdb/data/sorted"
+	"github.com/pointc-io/sliced/data/sorted"
 )
 
 func main() {

@@ -6,14 +6,13 @@ package item
 import (
 	"math"
 	"strconv"
+	"strings"
 	"unsafe"
 
-	"strings"
-
-	"github.com/pointc-io/ipdb/codec/gjson"
-	"github.com/pointc-io/ipdb/index/btree"
-	"github.com/pointc-io/ipdb/match"
-	"github.com/pointc-io/ipdb"
+	"github.com/pointc-io/sliced"
+	"github.com/pointc-io/sliced/codec/gjson"
+	"github.com/pointc-io/sliced/index/btree"
+	"github.com/pointc-io/sliced/match"
 )
 
 var (
@@ -909,7 +908,6 @@ type Key2 struct {
 	_1 Key
 	_2 Key
 }
-
 func (k Key2) Type() sliced.DataType {
 	return sliced.Any
 }
@@ -989,10 +987,10 @@ func (k Key2) LessThanItem(than btree.Item, item *ValueItem) bool {
 	switch t := than.(type) {
 	//case *Key2Item:
 	//	return k.LessThan(t.Key)
-		//case *Key3Item:
-		//	return k.LessThan(t.Key)
-		//case *Key4Item:
-		//	return k.LessThan(t.Key)
+	//case *Key3Item:
+	//	return k.LessThan(t.Key)
+	//case *Key4Item:
+	//	return k.LessThan(t.Key)
 
 	case Key:
 		return k.LessThan(t)

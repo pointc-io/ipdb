@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pointc-io/ipdb/db/buntdb"
+	"github.com/pointc-io/sliced/db/buntdb"
 )
 
 var N = 100000  // Number of requests

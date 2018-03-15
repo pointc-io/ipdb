@@ -1,7 +1,7 @@
 package item
 
 import (
-	"github.com/pointc-io/ipdb/codec/gjson"
+	"github.com/pointc-io/sliced/codec/gjson"
 )
 
 type IndexOpts int
@@ -296,10 +296,10 @@ func (i *IndexField) ParseArgs(offset int, buf [][]byte) Key {
 	if len(buf) < offset {
 		return Nil
 	}
-	return i.Parse(buf[offset])
+	return i.ParseArg(buf[offset])
 }
 
-func (i *IndexField) Parse(buf []byte) Key {
+func (i *IndexField) ParseArg(buf []byte) Key {
 	switch key := ParseKeyBytes(buf).(type) {
 	case IntKey:
 		if i.opts&IncludeInt != 0 {

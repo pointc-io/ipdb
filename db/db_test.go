@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/pointc-io/ipdb"
-	"github.com/pointc-io/ipdb/db/buntdb"
+	"github.com/pointc-io/sliced"
+	"github.com/pointc-io/sliced/db/buntdb"
 )
 
 var db *DB

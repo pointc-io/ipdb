@@ -4,10 +4,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pointc-io/ipdb/index/btree"
-	"github.com/pointc-io/ipdb/codec/gjson"
-	"github.com/pointc-io/ipdb/codec/sjson"
-	"github.com/pointc-io/ipdb"
+	"github.com/pointc-io/sliced"
+	"github.com/pointc-io/sliced/codec/gjson"
+	"github.com/pointc-io/sliced/codec/sjson"
+	"github.com/pointc-io/sliced/index/btree"
 )
 
 var (
@@ -21,7 +21,6 @@ type ValueItem struct {
 	Key     Key
 	Value   string
 	Expires int64
-
 	Indexes []IndexItem
 }
 

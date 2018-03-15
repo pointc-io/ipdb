@@ -2,53 +2,16 @@ package item
 
 import (
 	"sync"
-	"errors"
-	"github.com/pointc-io/ipdb/index/btree"
-	"github.com/pointc-io/ipdb/index/rtree"
-	//"github.com/pointc-io/ipdb/data/sorted"
-)
 
-var (
-	// ErrTxNotWritable is returned when performing a write operation on a
-	// read-only transaction.
-	ErrTxNotWritable = errors.New("tx not writable")
+	"github.com/pointc-io/sliced"
+	"github.com/pointc-io/sliced/index/btree"
+	"github.com/pointc-io/sliced/index/rtree"
 
-	// ErrTxClosed is returned when committing or rolling back a transaction
-	// that has already been committed or rolled back.
-	ErrTxClosed = errors.New("tx closed")
-
-	// ErrNotFound is returned when an value or idx is not in the database.
-	ErrNotFound = errors.New("not found")
-
-	// ErrInvalid is returned when the database file is an invalid format.
-	ErrInvalid = errors.New("invalid database")
-
-	// ErrDatabaseClosed is returned when the database is closed.
-	ErrDatabaseClosed = errors.New("database closed")
-
-	// ErrIndexExists is returned when an idx already exists in the database.
-	ErrIndexExists = errors.New("idx exists")
-
-	// ErrInvalidOperation is returned when an operation cannot be completed.
-	ErrInvalidOperation = errors.New("invalid operation")
-
-	// ErrInvalidSyncPolicy is returned for an invalid SyncPolicy value.
-	ErrInvalidSyncPolicy = errors.New("invalid sync policy")
-
-	// ErrShrinkInProcess is returned when a shrink operation is in-process.
-	ErrShrinkInProcess = errors.New("shrink is in-process")
-
-	// ErrPersistenceActive is returned when post-loading data from an database
-	// not opened with Open(":memory:").
-	ErrPersistenceActive = errors.New("persistence active")
-
-	// ErrTxIterating is returned when Set or Delete are called while iterating.
-	ErrTxIterating = errors.New("tx is iterating")
+	//"github.com/pointc-io/sliced/data/sorted"
 )
 
 // Default number of btree degrees
 //const btreeDegrees = 64
-
 
 // exctx is a simple b-tree context for ordering by expiration.
 type exctx struct {
@@ -248,13 +211,13 @@ func (db *Set) Set(key Key, value string, expires int64) (previousValue string,
 // has expired then ErrNotFound is returned.
 func (db *Set) Get(key Key) (val string, err error) {
 	if db == nil {
-		return "", ErrTxClosed
+		return "", sliced.ErrTxClosed
 	}
 	item := db.get(key)
 	if item == nil || item.expired() {
 		// The value does not exists or has expired. Let's assume that
 		// the caller is only interested in items that have not expired.
-		return "", ErrNotFound
+		return "", sliced.ErrNotFound
 	}
 	return item.Value, nil
 }
@@ -268,7 +231,7 @@ func (db *Set) Delete(key Key) (val string, err error) {
 
 	item := db.delete(&ValueItem{Key: key})
 	if item == nil {
-		return "", ErrNotFound
+		return "", sliced.ErrNotFound
 	}
 
 	// Even though the value has been deleted, we still want to check
@@ -276,7 +239,7 @@ func (db *Set) Delete(key Key) (val string, err error) {
 	if item.expired() {
 		// The value exists in the tree, but has expired. Let's assume that
 		// the caller is only interested in items that have not expired.
-		return "", ErrNotFound
+		return "", sliced.ErrNotFound
 	}
 	return item.Value, nil
 }
@@ -349,7 +312,7 @@ func (db *Set) scanSecondary(desc, gt, lt bool, index string, start, stop Key,
 	idx := db.idxs[index]
 	if idx == nil {
 		// idx was not found. return error
-		return ErrNotFound
+		return sliced.ErrNotFound
 	}
 	tr := idx.btr
 	if tr == nil {
@@ -415,7 +378,7 @@ func (db *Set) Nearby(index, bounds string,
 	idx := db.idxs[index]
 	if idx == nil {
 		// idx was not found. return error
-		return ErrNotFound
+		return sliced.ErrNotFound
 	}
 	if idx.rtr == nil {
 		// not an r-tree idx. just return nil
@@ -447,7 +410,7 @@ func (db *Set) Intersects(index, bounds string,
 	idx := db.idxs[index]
 	if idx == nil {
 		// idx was not found. return error
-		return ErrNotFound
+		return sliced.ErrNotFound
 	}
 	if idx.rtr == nil {
 		// not an r-tree idx. just return nil

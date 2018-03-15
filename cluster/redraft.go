@@ -16,9 +16,9 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/tidwall/raft-boltdb"
-	"github.com/pointc-io/ipdb/cluster/store"
-	"github.com/pointc-io/ipdb/cluster/transport"
-	"github.com/pointc-io/ipdb/redcon"
+	"github.com/pointc-io/sliced/cluster/store"
+	"github.com/pointc-io/sliced/cluster/transport"
+	"github.com/pointc-io/sliced/redcon"
 	"github.com/tidwall/redlog"
 )
 

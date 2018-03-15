@@ -3,10 +3,10 @@ package main
 import (
 	"testing"
 	"github.com/vmihailenco/msgpack"
-	"github.com/pointc-io/ipdb/codec/gjson"
+	"github.com/pointc-io/sliced/codec/gjson"
 	"fmt"
 	"strconv"
-	"github.com/pointc-io/ipdb/codec/sjson"
+	"github.com/pointc-io/sliced/codec/sjson"
 	"reflect"
 	"unsafe"
 )

@@ -1,10 +1,10 @@
 package server
 
 import (
-	"github.com/pointc-io/ipdb/service"
+	"github.com/pointc-io/sliced/service"
 
-	"github.com/pointc-io/ipdb"
-	"github.com/pointc-io/ipdb/db"
+	"github.com/pointc-io/sliced"
+	"github.com/pointc-io/sliced/db"
 )
 
 type Server struct {

@@ -2,8 +2,8 @@ package main
 
 import (
 	"testing"
-	"github.com/pointc-io/ipdb/index/sorted"
-	"github.com/pointc-io/ipdb/index/btree"
+	"github.com/pointc-io/sliced/index/sorted"
+	"github.com/pointc-io/sliced/index/btree"
 	"unsafe"
 	"fmt"
 )

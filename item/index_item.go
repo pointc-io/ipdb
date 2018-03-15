@@ -1,8 +1,8 @@
 package item
 
 import (
-	"github.com/pointc-io/ipdb/index/btree"
-	"github.com/pointc-io/ipdb/index/rtree"
+	"github.com/pointc-io/sliced/index/btree"
+	"github.com/pointc-io/sliced/index/rtree"
 )
 
 //

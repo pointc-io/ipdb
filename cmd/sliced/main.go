@@ -9,16 +9,16 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/pointc-io/ipdb/pid"
-	"github.com/pointc-io/ipdb/service"
+	"github.com/pointc-io/sliced/pid"
+	"github.com/pointc-io/sliced/service"
 
 	//_ "go.uber.org/automaxprocs"
 
 	_ "github.com/rs/zerolog/log"
-	"github.com/pointc-io/ipdb"
+	"github.com/pointc-io/sliced"
 
 	"runtime"
-	"github.com/pointc-io/ipdb/server"
+	"github.com/pointc-io/sliced/server"
 	"os/user"
 	"path/filepath"
 	"github.com/rs/zerolog"

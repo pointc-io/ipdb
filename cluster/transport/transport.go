@@ -17,7 +17,7 @@ import (
 
 	"github.com/garyburd/redigo/redis"
 	"github.com/hashicorp/raft"
-	"github.com/pointc-io/ipdb/redcon"
+	"github.com/pointc-io/sliced/redcon"
 )
 
 var (

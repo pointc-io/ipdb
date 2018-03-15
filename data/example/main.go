@@ -7,8 +7,8 @@ import (
 	"time"
 	"encoding/binary"
 	"unsafe"
-	"github.com/pointc-io/ipdb/data/btree"
-	"github.com/pointc-io/ipdb/data/sorted"
+	"github.com/pointc-io/sliced/data/btree"
+	"github.com/pointc-io/sliced/data/sorted"
 )
 
 type Item struct {
