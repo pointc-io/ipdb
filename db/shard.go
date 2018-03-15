@@ -23,8 +23,9 @@ import (
 	"log"
 	"bytes"
 	"github.com/rs/zerolog"
-	"github.com/pointc-io/ipdb/redcon/ev"
 	"strings"
+	"github.com/pointc-io/ipdb/item"
+	cmd "github.com/pointc-io/ipdb/command"
 )
 
 const (
@@ -61,8 +62,9 @@ type Shard struct {
 	enableSingle bool
 	localID      string
 
-	mu sync.Mutex
-	m  map[string]string // The key-value store for the system.
+	mu   sync.RWMutex
+	m    map[string]string // The key-value store for the system.
+	sets map[string]*item.Set
 
 	raft      *raft.Raft // The consensus mechanism
 	snapshots raft.SnapshotStore
@@ -109,6 +111,7 @@ func NewShard(id int, enableSingle bool, path, localID string, applier Applier) 
 		enableSingle: enableSingle,
 		applier:      applier,
 		m:            make(map[string]string),
+		sets:         make(map[string]*item.Set),
 		observerCh:   make(chan raft.Observation),
 	}
 	var name string
@@ -272,6 +275,28 @@ func (s *Shard) OnStop() {
 	close(s.observerCh)
 }
 
+func (s *Shard) GetSet() *item.Set {
+	s.mu.RLock()
+	set, ok := s.sets[""]
+	if !ok {
+		set = item.New()
+		s.sets[""] = set
+	}
+	s.mu.RUnlock()
+	return set
+}
+
+func (s *Shard) RunSet(key string, fn func (set *item.Set)) {
+	s.mu.RLock()
+	set, ok := s.sets[""]
+	if !ok {
+		set = item.New()
+		s.sets[""] = set
+	}
+	fn(set)
+	s.mu.RUnlock()
+}
+
 type raftLoggerWriter struct {
 	logger zerolog.Logger
 }
@@ -374,7 +399,7 @@ func (s *Shard) RequestVote(o []byte, args [][]byte) ([]byte, error) {
 }
 
 // Only for RESPTransport RAFTINSTALL
-func (s *Shard) HandleInstallSnapshot(conn *evred.Conn, arg []byte) evred.Command {
+func (s *Shard) HandleInstallSnapshot(conn *cmd.Context, arg []byte) cmd.Command {
 	return s.transport.HandleInstallSnapshot(conn, arg)
 }
 

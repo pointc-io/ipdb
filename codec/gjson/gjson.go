@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"github.com/pointc-io/ipdb/db/data/match"
+	"github.com/pointc-io/ipdb/match"
 )
 
 // Type is Result type

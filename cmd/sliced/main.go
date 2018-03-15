@@ -22,7 +22,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"github.com/rs/zerolog"
-	"time"
 )
 
 var port uint16
@@ -171,7 +170,7 @@ func start(cmd *cobra.Command, args []string) {
 	sliced.Logger = sliced.DaemonLogger(console)
 
 	zerolog.SetGlobalLevel(zerolog.Level(loglevel))
-	zerolog.TimeFieldFormat = time.RFC822Z
+	zerolog.TimeFieldFormat = ""
 
 	if !console {
 		// Ensure only 1 instance through PID lock

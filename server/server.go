@@ -4,7 +4,6 @@ import (
 	"github.com/pointc-io/ipdb/service"
 
 	"github.com/pointc-io/ipdb"
-	"github.com/pointc-io/ipdb/redcon/ev"
 	"github.com/pointc-io/ipdb/db"
 )
 
@@ -13,7 +12,7 @@ type Server struct {
 
 	host   string
 	path   string
-	server *evred.Server
+	server *EvServer
 	db     *db.DB
 }
 
@@ -23,7 +22,7 @@ func NewServer(host string, path string, eventLoops int) *Server {
 		path: path,
 	}
 
-	s.server = evred.NewServer(host, eventLoops)
+	s.server = NewEvServer(host, eventLoops)
 
 	s.BaseService = *service.NewBaseService(sliced.Logger, "server", s)
 	return s

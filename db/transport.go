@@ -17,7 +17,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"github.com/pointc-io/ipdb/redcon"
 	"github.com/pointc-io/ipdb/service"
-	"github.com/pointc-io/ipdb/redcon/ev"
+	cmd "github.com/pointc-io/ipdb/command"
 )
 
 const (
@@ -431,7 +431,7 @@ type snapshotHandler struct {
 	time       time.Time
 	reader     *io.PipeReader
 	writer     *io.PipeWriter
-	handler    evred.Handler
+	handler    cmd.Handler
 	downstream uint64
 }
 
@@ -439,10 +439,10 @@ func (s *snapshotHandler) ShardID(key string) int {
 	return 0
 }
 
-func (s *snapshotHandler) Commit(ctx *evred.CommandContext) {
+func (s *snapshotHandler) Commit(ctx *cmd.Context) {
 }
 
-func (s *snapshotHandler) Parse(ctx *evred.CommandContext) evred.Command {
+func (s *snapshotHandler) Parse(ctx *cmd.Context) cmd.Command {
 	args := ctx.Args
 	conn := ctx.Conn
 	packet := ctx.Packet
@@ -452,7 +452,7 @@ func (s *snapshotHandler) Parse(ctx *evred.CommandContext) evred.Command {
 		s.reader.CloseWithError(errInvalidRequest)
 		s.writer.CloseWithError(errInvalidRequest)
 		conn.Close()
-		return evred.ERR(fmt.Sprintf("ERR install snapshot mode only supports '%s' and '%s'", raftChunkName, raftDoneName))
+		return cmd.ERR(fmt.Sprintf("ERR install snapshot mode only supports '%s' and '%s'", raftChunkName, raftDoneName))
 	case raftChunkName:
 		s.downstream += uint64(len(packet))
 
@@ -460,28 +460,28 @@ func (s *snapshotHandler) Parse(ctx *evred.CommandContext) evred.Command {
 			s.reader.CloseWithError(errInvalidNumberOfArgs)
 			s.writer.CloseWithError(errInvalidNumberOfArgs)
 			conn.Close()
-			return evred.ERR("ERR invalid number of args")
+			return cmd.ERR("ERR invalid number of args")
 		}
 		if _, err := s.writer.Write(args[1]); err != nil {
 			s.reader.CloseWithError(err)
 			s.writer.CloseWithError(err)
 			conn.Close()
-			return evred.ERR(fmt.Sprintf("ERR writer error '%s'", err.Error()))
+			return cmd.ERR(fmt.Sprintf("ERR writer error '%s'", err.Error()))
 		}
-		return evred.OK()
+		return cmd.OK()
 	case raftDoneName:
 		s.writer.Close()
 		s.reader.Close()
-		return evred.OK()
+		return cmd.OK()
 	}
 	return nil
 }
 
-func (t *RESPTransport) HandleInstallSnapshot(conn *evred.Conn, arg []byte) evred.Command {
+func (t *RESPTransport) HandleInstallSnapshot(ctx *cmd.Context, arg []byte) cmd.Command {
 	var rpc raft.RPC
 	rpc.Command = &raft.InstallSnapshotRequest{}
 	if err := json.Unmarshal(arg, &rpc.Command); err != nil {
-		return evred.ERROR(err)
+		return cmd.ERROR(err)
 	}
 
 	// Create new pipe
@@ -500,14 +500,14 @@ func (t *RESPTransport) HandleInstallSnapshot(conn *evred.Conn, arg []byte) evre
 	if resp.Error != nil {
 		rd.Close()
 		wr.Close()
-		return evred.ERROR(resp.Error)
+		return cmd.ERROR(resp.Error)
 	}
 	// Marshal response
 	data, err := json.Marshal(resp.Response)
 	if err != nil {
 		rd.Close()
 		wr.Close()
-		return evred.ERROR(err)
+		return cmd.ERROR(err)
 	}
 
 	handler := &snapshotHandler{
@@ -516,11 +516,11 @@ func (t *RESPTransport) HandleInstallSnapshot(conn *evred.Conn, arg []byte) evre
 		reader:    rd,
 		writer:    wr,
 	}
-	handler.handler = conn.SetHandler(handler)
+	handler.handler = ctx.Conn.SetHandler(handler)
 
 	out := redcon.AppendOK(nil)
 	out = redcon.AppendBulk(out, data)
-	return evred.RAW(out)
+	return cmd.RAW(out)
 }
 
 //func (t *RESPTransport) handleInstallSnapshot(conn redcon.DetachedConn, arg []byte) {

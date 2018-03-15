@@ -8,15 +8,18 @@ import (
 	"strings"
 	"sort"
 	"strconv"
-
-	"github.com/pointc-io/ipdb"
-	"github.com/pointc-io/ipdb/redcon"
-	"github.com/pointc-io/ipdb/redcon/ev"
-	"github.com/pointc-io/ipdb/service"
-	"github.com/hashicorp/raft"
-	"github.com/pointc-io/ipdb/db/buntdb"
-	"github.com/tidwall/btree"
 	"unsafe"
+
+	"github.com/hashicorp/raft"
+	
+	"github.com/pointc-io/ipdb"
+
+	"github.com/pointc-io/ipdb/index/btree"
+	"github.com/pointc-io/ipdb/db/buntdb"
+	"github.com/pointc-io/ipdb/redcon"
+	"github.com/pointc-io/ipdb/service"
+	"github.com/pointc-io/ipdb/item"
+	cmd "github.com/pointc-io/ipdb/command"
 )
 
 const (
@@ -212,14 +215,12 @@ func (d *DB) OnStop() {
 	}
 }
 
-type handler DB
-
-func (d *DB) Commit(ctx *evred.CommandContext) {
+func (d *DB) Commit(ctx *cmd.Context) {
 	if len(ctx.Changes) == 0 {
 		return
 	}
 
-LOOP:
+	//LOOP:
 	for key, set := range ctx.Changes {
 		shard := d.Shard(key)
 		if shard == nil {
@@ -227,7 +228,9 @@ LOOP:
 				ctx.Out = redcon.AppendError(ctx.Out, fmt.Sprintf("ERR shard %d not on node", key))
 			}
 		} else {
-			if ctx.Conn.Durability == evred.High {
+			ctx.Set = shard.GetSet()
+
+			if ctx.Conn.Durability() == cmd.High {
 				future := shard.raft.Apply(set.Data, raftTimeout)
 
 				var err error
@@ -254,37 +257,37 @@ LOOP:
 					}
 				}
 			} else {
-				tx, err := shard.db.Begin(true)
+				//tx, err := shard.db.Begin(true)
 
-				if err != nil {
-					for i := 0; i < len(set.Cmds); i++ {
-						ctx.Out = ctx.AppendError(fmt.Sprintf("ERR failed to start tx %v", err.Error()))
-					}
-					delete(ctx.Changes, key)
-					continue LOOP
-				}
+				//if err != nil {
+				//	for i := 0; i < len(set.Cmds); i++ {
+				//		ctx.Out = ctx.AppendError(fmt.Sprintf("ERR failed to start tx %v", err.Error()))
+				//	}
+				//	delete(ctx.Changes, key)
+				//	continue LOOP
+				//}
 
-				begin := len(ctx.Out)
-				ctx.DB = shard.db
-				ctx.Tx = tx
+				//begin := len(ctx.Out)
+				//ctx.DB = shard.db
+				//ctx.Tx = tx
+
 				for i := 0; i < len(set.Cmds); i++ {
 					ctx.Out = set.Cmds[i].Invoke(ctx)
 				}
 
-				err = tx.Commit()
-				if err != nil {
-					ctx.Out = ctx.Out[:begin]
-					for i := 0; i < len(set.Cmds); i++ {
-						ctx.Out = redcon.AppendError(ctx.Out, "ERR "+err.Error())
-					}
-				} else {
-					// Apply inside lock.
-					shard.raft.Apply(set.Data, raftTimeout)
-				}
+				//err = tx.Commit()
+				//if err != nil {
+				//	ctx.Out = ctx.Out[:begin]
+				//	for i := 0; i < len(set.Cmds); i++ {
+				//		ctx.Out = redcon.AppendError(ctx.Out, "ERR "+err.Error())
+				//	}
+				//} else {
+				// Apply inside lock.
+				shard.raft.Apply(set.Data, raftTimeout)
+				//}
 
 				// Cleanup
-				ctx.DB = nil
-				ctx.Tx = nil
+				//ctx.Set = nil
 
 				// Remove change set.
 				delete(ctx.Changes, key)
@@ -292,14 +295,6 @@ LOOP:
 		}
 	}
 }
-
-//func (d *DB) Commit(conn *evred.Conn, shard int, commitlog []byte) (raft.ApplyFuture, error) {
-//	s := d.Shard(shard)
-//	if s == nil {
-//		return nil, ErrShardNotExists
-//	}
-//	return s.raft.Apply(commitlog, raftTimeout), nil
-//}
 
 func (d *DB) Apply(shard *Shard, l *raft.Log) interface{} {
 	tx, err := shard.db.Begin(true)
@@ -331,42 +326,6 @@ func (d *DB) Apply(shard *Shard, l *raft.Log) interface{} {
 		if len(args) > 0 {
 			name := strings.ToUpper(string(args[0]))
 			switch name {
-			case "SET2":
-				key := string(args[1])
-				d.mu.Lock()
-				item := d.tree.Get(&dbItem{key: key})
-				ok := false
-				var prev string
-				var it *dbItem
-				if item != nil {
-					it = item.(*dbItem)
-					prev = it.value
-					ok = true
-				} else {
-					it = &dbItem{key: key, value: string(args[2])}
-					d.tree.ReplaceOrInsert(it)
-				}
-				_ = prev
-				//prev, ok := d._map[key]
-				//d._map[key] = string(args[2])
-				d.mu.Unlock()
-				if !ok {
-					reply = redcon.AppendNull(reply)
-				} else {
-					reply = redcon.AppendBulkString(reply, "hi")
-				}
-
-				//key := string(args[1])
-				//prev, ok := d._map[key]
-				//d._map[key] = string(args[2])
-				//if leader {
-				//	if !ok {
-				//		reply = redcon.AppendNull(reply)
-				//	} else {
-				//		reply = redcon.AppendBulkString(reply, prev)
-				//	}
-				//}
-
 			case "SET":
 				prev, replaced, err := tx.Set(string(args[1]), string(args[2]), nil)
 
@@ -405,93 +364,88 @@ func (d *DB) Apply(shard *Shard, l *raft.Log) interface{} {
 	}
 }
 
-type dbItem struct {
-	key   string
-	value string
-}
-
-func (item *dbItem) Less(than btree.Item, ctx interface{}) bool {
-	return true
-}
-
 func castString(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
 type SetCmd struct {
-	evred.WriteCmd
+	cmd.WriteCmd
 
 	Key   string
 	Value string
 }
 
-func (c *SetCmd) Invoke(ctx *evred.CommandContext) []byte {
-	val, replaced, err := ctx.Tx.Set(c.Key, c.Value, nil)
+func (c *SetCmd) Invoke(ctx *cmd.Context) []byte {
+	prev, replaced, err := ctx.Set.Set((item.StringKey)(c.Key), c.Value, 0)
 	if err != nil {
-		if err == buntdb.ErrNotFound {
+		if err == item.ErrNotFound {
 			return ctx.AppendNull()
 		} else {
 			return ctx.AppendError("ERR data not available " + err.Error())
 		}
 	} else {
 		if replaced {
-			return ctx.AppendBulkString(val)
+			return ctx.AppendBulkString(prev)
 		} else {
 			return ctx.AppendNull()
 		}
 	}
 }
 
-func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
+func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 	//name := strings.ToUpper(castString(args[0]))
 	args := ctx.Args
 	key := ctx.Key
 
-	var cmd evred.Command
+	var _cmd cmd.Command
 	switch ctx.Name {
 	default:
-		return evred.RAW(redcon.AppendError(nil, "ERR invalid command"))
+		return cmd.RAW(redcon.AppendError(nil, "ERR invalid command"))
 
-	case txModeName:
-		switch strings.ToUpper(key) {
-		default:
-			ctx.Conn.Durability = evred.Medium
-		case "0":
-			ctx.Conn.Durability = evred.Medium
-		case "MEDIUM":
-			ctx.Conn.Durability = evred.Medium
-		case "1":
-			ctx.Conn.Durability = evred.High
-		case "2":
-			ctx.Conn.Durability = evred.High
-		case "HIGH":
-			ctx.Conn.Durability = evred.High
-		}
+	//case txModeName:
+	//	switch strings.ToUpper(key) {
+	//	default:
+	//		ctx.Conn.durability = cmd.Medium
+	//	case "0":
+	//		ctx.Conn.durability = cmd.Medium
+	//	case "MEDIUM":
+	//		ctx.Conn.durability = cmd.Medium
+	//	case "1":
+	//		ctx.Conn.durability = cmd.High
+	//	case "2":
+	//		ctx.Conn.durability = cmd.High
+	//	case "HIGH":
+	//		ctx.Conn.durability = cmd.High
+	//	}
 
 	case getName:
 		if len(ctx.Args) != 2 {
-			return evred.ERR("ERR 1 parameter expected")
+			return cmd.ERR("ERR 1 parameter expected")
 		} else {
 			shard := d.Get(key)
 			if shard == nil {
-				return evred.ERR(fmt.Sprintf("ERR shard not on node"))
+				return cmd.ERR(fmt.Sprintf("ERR shard not on node"))
 			} else {
-				val, err := shard.db.Get(key)
-				if err != nil {
-					if err == buntdb.ErrNotFound {
-						return evred.RAW(redcon.AppendNull(nil))
+				var _cmd cmd.Command
+				shard.RunSet(key, func(set *item.Set) {
+					val, err := set.Get((item.StringKey)(key))
+					if err != nil {
+						if err == buntdb.ErrNotFound {
+							_cmd = cmd.RAW(redcon.AppendNull(nil))
+						} else {
+							_cmd = cmd.ERR("ERR data not available " + err.Error())
+						}
 					} else {
-						return evred.ERR("ERR data not available " + err.Error())
+						_cmd = cmd.RAW(redcon.AppendBulkString(nil, val))
 					}
-				} else {
-					return evred.RAW(redcon.AppendBulkString(nil, val))
-				}
+				})
+				return _cmd
 			}
 		}
 
 	case setName:
 		if len(args) < 3 {
-			return evred.ERR("ERR invalid parameters")
+			return cmd.ERR("ERR invalid parameters")
 		}
 
 		//key := string(args[1])
@@ -512,16 +466,16 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 		////d._map[key] = string(args[2])
 		//d.mu.Unlock()
 		//if !ok {
-		//	return evred.RAW(redcon.AppendNull(nil))
+		//	return cmd.RAW(redcon.AppendNull(nil))
 		//} else {
-		//	return evred.RAW(redcon.AppendBulkString(nil, prev))
+		//	return cmd.RAW(redcon.AppendBulkString(nil, prev))
 		//}
 
 		value := string(args[2])
 
 		shard := d.Get(key)
 		if shard == nil {
-			return evred.ERR(fmt.Sprintf("ERR shard not on node"))
+			return cmd.ERR(fmt.Sprintf("ERR shard not on node"))
 		} else {
 			ctx.ShardID = shard.id
 			return &SetCmd{Key: key, Value: value}
@@ -529,12 +483,12 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 			//val, err := shard.db.Set(string(key), value)
 			//if err != nil {
 			//	if err == buntdb.ErrNotFound {
-			//		return evred.AsyncWrite(redcon.AppendNull(nil))
+			//		return cmd.AsyncWrite(redcon.AppendNull(nil))
 			//	} else {
-			//		return evred.ERR("ERR data not available " + err.Error())
+			//		return cmd.ERR("ERR data not available " + err.Error())
 			//	}
 			//} else {
-			//	return evred.AsyncWrite(redcon.AppendBulkString(nil, val))
+			//	return cmd.AsyncWrite(redcon.AppendBulkString(nil, val))
 			//}
 		}
 
@@ -549,11 +503,11 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 		//	out = redcon.AppendNull(out)
 		//}
 
-		//return evred.RAW(redcon.AppendOK(nil))
-		//return evred.WRITE
+		//return cmd.RAW(redcon.AppendOK(nil))
+		//return cmd.WRITE
 
 	case delName:
-		return evred.WRITE
+		return cmd.WRITE
 
 	case "SHRINK":
 
@@ -566,24 +520,24 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 			shard.Shrink()
 		}
 
-		return evred.OK()
+		return cmd.OK()
 
 	case "KEYS":
-		return evred.RAW(redcon.AppendInt(nil, int64(d.shards[0].db.NumKeys())))
+		return cmd.RAW(redcon.AppendInt(nil, int64(d.shards[0].db.NumKeys())))
 
 	case raftInstallName:
 		if len(args) < 3 {
-			return evred.ERR("ERR 2 parameters expected")
+			return cmd.ERR("ERR 2 parameters expected")
 		} else {
 			id, err := strconv.Atoi(string(args[1]))
 			if err != nil {
-				return evred.ERR("ERR invalid int param for shard id")
+				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
 				shard := d.Shard(id)
 				if shard == nil {
-					return evred.ERR(fmt.Sprintf("ERR shard %d not on node", id))
+					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
-					return shard.HandleInstallSnapshot(ctx.Conn, args[2])
+					return shard.HandleInstallSnapshot(ctx, args[2])
 				}
 			}
 		}
@@ -594,22 +548,22 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 
 	case raftJoinName:
 		if len(args) < 3 {
-			return evred.ERR("ERR 2 parameters")
+			return cmd.ERR("ERR 2 parameters")
 		} else {
 			id, err := strconv.Atoi(string(args[1]))
 			if err != nil {
-				return evred.ERR("ERR invalid int param for shard id")
+				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
 				shard := d.Shard(id)
 				if shard == nil {
-					return evred.ERR(fmt.Sprintf("ERR shard %d not on node", id))
+					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
 					addr := string(args[2])
 					addr = strings.Trim(addr, "")
 					if err := shard.Join(addr, addr); err != nil {
-						return evred.ERR(fmt.Sprintf("ERR %s", err.Error()))
+						return cmd.ERR(fmt.Sprintf("ERR %s", err.Error()))
 					} else {
-						return evred.RAW(redcon.AppendOK(nil))
+						return cmd.RAW(redcon.AppendOK(nil))
 					}
 				}
 			}
@@ -617,22 +571,22 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 
 	case raftRemoveName:
 		if len(args) < 3 {
-			return evred.ERR("ERR 2 parameters")
+			return cmd.ERR("ERR 2 parameters")
 		} else {
 			id, err := strconv.Atoi(string(args[1]))
 			if err != nil {
-				return evred.ERR("ERR invalid int param for shard id")
+				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
 				shard := d.Shard(id)
 				if shard == nil {
-					return evred.ERR(fmt.Sprintf("ERR shard %d not on node", id))
+					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
 					addr := string(args[2])
 					addr = strings.Trim(addr, "")
 					if err := shard.Leave(addr, addr); err != nil {
-						return evred.ERR(fmt.Sprintf("ERR %s", err.Error()))
+						return cmd.ERR(fmt.Sprintf("ERR %s", err.Error()))
 					} else {
-						return evred.RAW(redcon.AppendOK(nil))
+						return cmd.RAW(redcon.AppendOK(nil))
 					}
 				}
 			}
@@ -640,21 +594,21 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 
 	case raftAppendName:
 		if len(args) < 3 {
-			return evred.ERR("ERR 2 parameters expected")
+			return cmd.ERR("ERR 2 parameters expected")
 		} else {
 			id, err := strconv.Atoi(string(args[1]))
 			if err != nil {
-				return evred.ERR("ERR invalid int param for shard id")
+				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
 				shard := d.Shard(id)
 				if shard == nil {
-					return evred.ERR(fmt.Sprintf("ERR shard %d not on node", id))
+					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
 					b, err := shard.AppendEntries(nil, args)
 					if err != nil {
-						return evred.ERR(fmt.Sprintf("ERR %s", err.Error()))
+						return cmd.ERR(fmt.Sprintf("ERR %s", err.Error()))
 					} else {
-						return evred.RAW(b)
+						return cmd.RAW(b)
 					}
 				}
 			}
@@ -662,28 +616,28 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 
 	case raftVoteName:
 		if len(args) < 3 {
-			return evred.ERR("ERR 2 parameters expected")
+			return cmd.ERR("ERR 2 parameters expected")
 		} else {
 			id, err := strconv.Atoi(string(args[1]))
 			if err != nil {
-				return evred.ERR("ERR invalid int param for shard id")
+				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
 				shard := d.Shard(id)
 				if shard == nil {
-					return evred.ERR(fmt.Sprintf("ERR shard %d not on node", id))
+					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
 					b, err := shard.RequestVote(nil, args)
 					if err != nil {
-						return evred.ERR(fmt.Sprintf("ERR %s", err.Error()))
+						return cmd.ERR(fmt.Sprintf("ERR %s", err.Error()))
 					} else {
-						return evred.RAW(b)
+						return cmd.RAW(b)
 					}
 				}
 			}
 		}
 
 	case raftLeaderName:
-		return evred.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
 			leader, err := shard.Leader()
 			if err != nil {
 				return redcon.AppendError(nil, "ERR "+err.Error())
@@ -693,7 +647,7 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 		}))
 
 	case raftStatsName:
-		return evred.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
 			stats := shard.Stats()
 			keys := make([]string, 0, len(stats))
 			for key := range stats {
@@ -710,13 +664,13 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 		}))
 
 	case raftStateName:
-		return evred.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
 			state := shard.State()
 			return redcon.AppendBulkString(nil, state.String())
 		}))
 
 	case raftShrinkName:
-		return evred.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
 			err := shard.ShrinkLog()
 			if err != nil {
 				return redcon.AppendError(nil, "ERR "+err.Error())
@@ -726,14 +680,14 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 		}))
 
 	case raftSnapshotName:
-		return evred.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
 			f := shard.raft.Snapshot()
 			_ = f
 			return redcon.AppendOK(nil)
 		}))
 
 	case raftSnapshotsName:
-		return evred.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
 			f, err := shard.snapshots.List()
 			if err != nil {
 				return redcon.AppendError(nil, err.Error())
@@ -751,7 +705,7 @@ func (d *DB) Parse(ctx *evred.CommandContext) evred.Command {
 			}
 		}))
 	}
-	return cmd
+	return _cmd
 }
 
 func (d *DB) raftShard(out []byte, args [][]byte, fn func(shard *Shard) []byte) []byte {
@@ -778,7 +732,7 @@ func (d *DB) raftShard(out []byte, args [][]byte, fn func(shard *Shard) []byte) 
 }
 
 type setCmd struct {
-	evred.WriteCmd
+	cmd.WriteCmd
 }
 
 //func (s *setCmd) Invoke(b []byte) []byte {
