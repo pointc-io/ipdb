@@ -57,6 +57,12 @@ type exctx struct {
 
 var defaultFreeList = new(btree.FreeList)
 
+type Map interface {
+	Get(key Key) (*ValueItem, error)
+	Put(key Key, value string, expires int64) (*ValueItem, bool, error)
+	Remove(key Key) (*ValueItem, error)
+}
+
 //
 type Set struct {
 	commitIndex uint64
