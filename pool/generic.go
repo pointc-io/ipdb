@@ -11,7 +11,7 @@ var DefaultPool = New(128, 65536, nil)
 //
 // Note that size could be ceiled to the next power of two.
 //
-// Get is a wrapper around DefaultPool.Get().
+// SliceForKey is a wrapper around DefaultPool.SliceForKey().
 func Get(size int) (interface{}, int) { return DefaultPool.Get(size) }
 
 // Put takes x and its size for future reuse.

@@ -1,4 +1,4 @@
-package db
+package slice
 
 import (
 	"testing"
@@ -9,21 +9,21 @@ import (
 	"github.com/pointc-io/sliced/db/buntdb"
 )
 
-var db *DB
+var db *SliceMaster
 
 func init() {
 	sliced.Logger = sliced.CLILogger()
 }
 
-func runFile(t *testing.T, f func(db *DB)) {
+func runFile(t *testing.T, f func(db *SliceMaster)) {
 	run(t, filepath.Join(sliced.Path, "data"), f)
 }
 
-func runMemory(t *testing.T, f func(db *DB)) {
+func runMemory(t *testing.T, f func(db *SliceMaster)) {
 	run(t, ":memory:", f)
 }
 
-func run(t *testing.T, path string, f func(db *DB)) {
+func run(t *testing.T, path string, f func(db *SliceMaster)) {
 	db = NewDB("", path)
 	err := db.Start()
 	if err != nil {
@@ -39,7 +39,7 @@ func run(t *testing.T, path string, f func(db *DB)) {
 }
 
 func TestDB(t *testing.T) {
-	runMemory(t, func(db *DB) {
+	runMemory(t, func(db *SliceMaster) {
 
 	})
 }
@@ -51,11 +51,11 @@ func TestNewDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Println(db.Get("somekey{0110}withredishash_part").id)
-	fmt.Println(db.Get("a_a{0110}a_a").id)
-	fmt.Println(db.Get("0110").id)
+	fmt.Println(db.SliceForKey("somekey{0110}withredishash_part").id)
+	fmt.Println(db.SliceForKey("a_a{0110}a_a").id)
+	fmt.Println(db.SliceForKey("0110").id)
 
-	db.Get("somekey{0110}withredishash_part").db.Update(func(tx *buntdb.Tx) error {
+	db.SliceForKey("somekey{0110}withredishash_part").db.Update(func(tx *buntdb.Tx) error {
 		return nil
 	})
 }
@@ -77,7 +77,7 @@ func TestNewDB(t *testing.T) {
 //		return nil
 //	})
 //	p.db.View(func(tx *buntdb.Tx) error {
-//		val, err := tx.Get(key)
+//		val, err := tx.SliceForKey(key)
 //
 //		if err != nil {
 //			t.Error(err)
@@ -129,7 +129,7 @@ func TestNewDB(t *testing.T) {
 //		fmt.Println()
 //		fmt.Println("last_name DESC")
 //		tx.Descend("last_name", func(key, value string) bool {
-//			fmt.Printf("LastName: %s\n", gjson.Get(value, "name.last"))
+//			fmt.Printf("LastName: %s\n", gjson.SliceForKey(value, "name.last"))
 //			//fmt.Printf("%s: %s\n", key, value)
 //
 //			return true
@@ -137,7 +137,7 @@ func TestNewDB(t *testing.T) {
 //		fmt.Println()
 //		fmt.Println("last_name ASC")
 //		tx.Ascend("last_name", func(key, value string) bool {
-//			//fmt.Printf("LastName: %s\n", gjson.Get(value, "name.last"))
+//			//fmt.Printf("LastName: %s\n", gjson.SliceForKey(value, "name.last"))
 //			fmt.Printf("%s: %s\n", key, value)
 //			return true
 //		})

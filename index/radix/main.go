@@ -1,9 +1,10 @@
 package main
 
 import (
-	"github.com/armon/go-radix"
 	"fmt"
-	"github.com/pointc-io/sliced/data/sorted"
+
+	"github.com/armon/go-radix"
+	"github.com/pointc-io/sliced/item"
 )
 
 func main() {
@@ -11,8 +12,8 @@ func main() {
 	val := []byte("Some value")
 	tree := radix.New()
 
-	for i := 0; i < 10000; i++ {
-		key := sorted.IntToString(i)
+	for i := uint64(0); i < 10000; i++ {
+		key := item.UInt64ToString(i)
 		//key := strconv.Itoa(i)
 		tree.Insert(key, val)
 	}

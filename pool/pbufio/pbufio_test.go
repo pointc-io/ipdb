@@ -26,7 +26,7 @@ func TestGetWriter(t *testing.T) {
 			p := NewWriterPool(test.min, test.max)
 			bw := p.Get(nil, test.get)
 			if n, exp := bw.Available(), test.exp; n != exp {
-				t.Errorf("unexpected Get() buffer size: %v; want %v", n, exp)
+				t.Errorf("unexpected SliceForKey() buffer size: %v; want %v", n, exp)
 			}
 		})
 	}
@@ -56,7 +56,7 @@ func TestGetReader(t *testing.T) {
 			p := NewReaderPool(test.min, test.max)
 			br := p.Get(nil, test.get)
 			if n, exp := readerSize(br), test.exp; n != exp {
-				t.Errorf("unexpected Get() buffer size: %v; want %v", n, exp)
+				t.Errorf("unexpected SliceForKey() buffer size: %v; want %v", n, exp)
 			}
 		})
 	}

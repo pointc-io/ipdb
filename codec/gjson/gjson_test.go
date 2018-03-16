@@ -780,7 +780,7 @@ func testManyAny(t *testing.T, json string, paths, expected []string, bytes bool
 	for i := 0; i < 2; i++ {
 		var which string
 		if i == 0 {
-			which = "Get"
+			which = "SliceForKey"
 			result = nil
 			for j := 0; j < len(expected); j++ {
 				if bytes {

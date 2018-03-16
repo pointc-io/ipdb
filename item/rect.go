@@ -9,22 +9,20 @@ import (
 	"github.com/pointc-io/sliced/index/btree"
 )
 
+// A multidimensional rectangle for spatial queries and indexing.
+// Indended for a R-Tree index.
 type Rect struct {
 	Min, Max []float64
 }
-
 func (r Rect) Type() sliced.DataType {
 	return sliced.Rect
 }
-
 func (r Rect) Match(pattern string) bool {
 	return pattern == "*"
 }
-
 func (r Rect) LessThan(key Key) bool {
 	return true
 }
-
 func (r Rect) LessThanItem(than btree.Item, item *ValueItem) bool {
 	switch t := than.(type) {
 	case Rect:
@@ -33,13 +31,14 @@ func (r Rect) LessThanItem(than btree.Item, item *ValueItem) bool {
 	}
 	return false
 }
-
 func (r Rect) Less(than btree.Item, ctx interface{}) bool {
 	return false
 }
-
 func (r Rect) Rect(ctx interface{}) (min []float64, max []float64) {
 	return r.Min, r.Max
+}
+func (r Rect) Compare(key Key) int {
+	return -1
 }
 
 func (r Rect) String() string {
@@ -100,6 +99,7 @@ func normalize(min, max []float64) (nmin, nmax []float64) {
 	return min, max
 }
 
+//
 func ParseRect(s string) Rect {
 	var i int
 	var ws bool
@@ -128,6 +128,7 @@ func ParseRect(s string) Rect {
 	return Rect{Min: min, Max: max}
 }
 
+//
 func getRect(s string, i int) (min, max []float64, ri int) {
 	a := s[i:]
 	parts := strings.Split(a, ",")
@@ -167,6 +168,7 @@ func getRect(s string, i int) (min, max []float64, ri int) {
 	return min, max, len(s)
 }
 
+//
 func union(min1, max1, min2, max2 []float64) (umin, umax []float64) {
 	for i := 0; i < len(min1) || i < len(min2); i++ {
 		if i >= len(min1) {
@@ -193,6 +195,7 @@ func union(min1, max1, min2, max2 []float64) (umin, umax []float64) {
 	return umin, umax
 }
 
+//
 func getWKT(s string, i int) (min, max []float64, ri int) {
 	switch s[i] {
 	default:
@@ -213,6 +216,7 @@ func getWKT(s string, i int) (min, max []float64, ri int) {
 	}
 }
 
+//
 func getWKTAny(s string, i int) (min, max []float64, ri int) {
 	min, max = make([]float64, 0, 4), make([]float64, 0, 4)
 	var depth int
@@ -259,6 +263,7 @@ loop:
 	return min, max, i
 }
 
+//
 func getWKTGeometryCollection(s string, i int) (min, max []float64, ri int) {
 	var depth int
 	for ; i < len(s); i++ {
@@ -311,6 +316,8 @@ end_early:
 done:
 	return min, max, i
 }
+
+//
 func getGeoJSON(s string, i int) (min, max []float64, ri int) {
 	json := s[i:]
 	switch gjson.Get(json, "type").String() {
@@ -332,6 +339,7 @@ func getGeoJSON(s string, i int) (min, max []float64, ri int) {
 	return min, max, len(json)
 }
 
+//
 func getMinMaxBrackets(s string) (min, max []float64) {
 	var ni int
 	var idx int

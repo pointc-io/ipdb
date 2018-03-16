@@ -137,7 +137,7 @@ func TestSecondary(t *testing.T) {
 
 	fmt.Println()
 	fmt.Println("Order by age range 30-50")
-	db.Ascend("last_name", func(key IndexItem) bool {
+	db.Descend("last_name", func(key IndexItem) bool {
 		res := gjson.Get(key.Value().Value, "name.last")
 		age := gjson.Get(key.Value().Value, "age")
 		fmt.Printf("%s: %s\n", age.Raw, res.Raw)
@@ -155,8 +155,8 @@ func TestSecondary(t *testing.T) {
 	})
 	//db.AscendRange("age", FloatKey(30), FloatKey(52), func(key Value) bool {
 	//	//db.AscendRange("age", &FloatItem{key: 30}, &FloatItem{key: 51}, func(key Value) bool {
-	//	res := gjson.Get(key.Value().Value, "name.last")
-	//	age := gjson.Get(key.Value().Value, "age")
+	//	res := gjson.SliceForKey(key.Value().Value, "name.last")
+	//	age := gjson.SliceForKey(key.Value().Value, "age")
 	//	fmt.Printf("%s: %s\n", age.Raw, res.Raw)
 	//	return true
 	//})

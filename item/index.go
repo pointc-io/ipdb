@@ -178,8 +178,8 @@ func (idx *Index) rebuild() {
 // less function to handle the content format and comparison.
 // There are some default less function that can be used such as
 // IndexString, IndexBinary, etc.
-func (db *Set) CreateIndex(name, pattern string, indexer Indexer) error {
-	return db.createIndex(BTree, name, pattern, indexer)
+func (s *Set) CreateIndex(name, pattern string, indexer Indexer) error {
+	return s.createIndex(BTree, name, pattern, indexer)
 }
 
 // CreateSpatialIndex builds a new idx and populates it with items.
@@ -196,12 +196,12 @@ func (db *Set) CreateIndex(name, pattern string, indexer Indexer) error {
 // Thus min[0] must be less-than-or-equal-to max[0].
 // The IndexRect is a default function that can be used for the rect
 // parameter.
-func (db *Set) CreateSpatialIndex(name, pattern string, indexer Indexer) error {
-	return db.createIndex(RTree, name, pattern, indexer)
+func (s *Set) CreateSpatialIndex(name, pattern string, indexer Indexer) error {
+	return s.createIndex(RTree, name, pattern, indexer)
 }
 
 // createIndex is called by CreateIndex() and CreateSpatialIndex()
-func (db *Set) createIndex(
+func (s *Set) createIndex(
 	idxType IndexType,
 	name string,
 	pattern string,
@@ -213,7 +213,7 @@ func (db *Set) createIndex(
 		return sliced.ErrIndexExists
 	}
 	// check if an idx with that name already exists.
-	if _, ok := db.idxs[name]; ok {
+	if _, ok := s.idxs[name]; ok {
 		// idx with name already exists. error.
 		return sliced.ErrIndexExists
 	}
@@ -223,29 +223,29 @@ func (db *Set) createIndex(
 		t:       idxType,
 		name:    name,
 		pattern: pattern,
-		db:      db,
+		db:      s,
 		indexer: indexer,
 	}
 
 	// save the idx
-	db.insertIndex(idx)
+	s.insertIndex(idx)
 
 	idx.rebuild()
 	return nil
 }
 
 // DropIndex removes an idx.
-func (db *Set) DropIndex(name string) error {
+func (s *Set) DropIndex(name string) error {
 	if name == "" {
 		// cannot drop the default "keys" idx
 		return sliced.ErrInvalidOperation
 	}
-	idx, ok := db.idxs[name]
+	idx, ok := s.idxs[name]
 	if !ok {
 		return sliced.ErrNotFound
 	}
 
-	db.removeIndex(idx)
+	s.removeIndex(idx)
 
 	return nil
 }

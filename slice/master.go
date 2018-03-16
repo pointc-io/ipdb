@@ -1,25 +1,25 @@
-package db
+package slice
 
 import (
-	"path/filepath"
-	"os"
-	"sync"
 	"fmt"
-	"strings"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/hashicorp/raft"
-	
+
 	"github.com/pointc-io/sliced"
 
-	"github.com/pointc-io/sliced/index/btree"
+	cmd "github.com/pointc-io/sliced/command"
 	"github.com/pointc-io/sliced/db/buntdb"
+	"github.com/pointc-io/sliced/index/btree"
+	"github.com/pointc-io/sliced/item"
 	"github.com/pointc-io/sliced/redcon"
 	"github.com/pointc-io/sliced/service"
-	"github.com/pointc-io/sliced/item"
-	cmd "github.com/pointc-io/sliced/command"
 )
 
 const (
@@ -28,23 +28,23 @@ const (
 	delName    = "DEL"
 	txModeName = "TX"
 
-	raftInstallName   = "RAFTINSTALL"
-	raftAppendName    = "RAFTAPPEND"
-	raftVoteName      = "RAFTVOTE"
-	raftChunkName     = "CHUNK"
-	raftDoneName      = "DONE"
-	raftSnapshotName  = "RAFTSNAPSHOT"
-	raftSnapshotsName = "RAFTSNAPSHOTS"
-	raftJoinName      = "RAFTJOIN"
-	raftRemoveName    = "RAFTREMOVE"
-	raftStatsName     = "RAFTSTATS"
-	raftStateName     = "RAFTSTATE"
-	raftLeaderName    = "RAFTLEADER"
-	raftShrinkName    = "RAFTSHRINK"
+	raftInstallSnapshotName = "RAFTINSTALL"
+	raftAppendName          = "RAFTAPPEND"
+	raftVoteName            = "RAFTVOTE"
+	raftChunkName           = "CHUNK"
+	raftDoneName            = "DONE"
+	raftSnapshotName        = "RAFTSNAPSHOT"
+	raftSnapshotsName       = "RAFTSNAPSHOTS"
+	raftJoinName            = "RAFTJOIN"
+	raftRemoveName          = "RAFTREMOVE"
+	raftStatsName           = "RAFTSTATS"
+	raftStateName           = "RAFTSTATE"
+	raftLeaderName          = "RAFTLEADER"
+	raftShrinkName          = "RAFTSHRINK"
 )
 
 var (
-	raftInstall = []byte(raftInstallName)
+	raftInstall = []byte(raftInstallSnapshotName)
 	raftAppend  = []byte(raftAppendName)
 	raftVote    = []byte(raftVoteName)
 	raftChunk   = []byte(raftChunkName)
@@ -56,40 +56,38 @@ var (
 	raftShrink  = []byte(raftShrinkName)
 )
 
-// DB is broken up into Partitions that are assigned to a slot.
+// SliceMaster is broken up into Partitions that are assigned to a slot.
 // There are 16384 slots.
 // Partitions are balanced first across cores then nodes.
 
 type Slots struct {
-	Index  [16384]*Shard
-	Shards []*Shard
+	Index  [16384]*Slice
+	Shards []*Slice
 }
 
-// DB maintains cluster wide consensus which maintains shard raft groups.
+// SliceMaster maintains master wide consensus which maintains shard raft groups.
 // Each shard needs a minimum of 3 nodes.
-// Shard selection is determined using a CRC16 on the key and follows the same paradigm as Redis Cluster.
-type DB struct {
+// Slice selection is determined using a CRC16 on the key and follows the same paradigm as Redis Cluster.
+type SliceMaster struct {
 	service.BaseService
 
-	host    string
-	path    string
-	bind    string
-	cluster *Shard
-	shards  []*Shard
+	host   string
+	path   string
+	bind   string
+	master *Slice
+	slices []*Slice
+	table  [16384]*Slice
 
 	mu sync.RWMutex
-
-	_map map[string]string
 
 	tree *btree.BTree
 }
 
-func NewDB(host, path string) *DB {
-	d := &DB{
+func NewDB(host, path string) *SliceMaster {
+	d := &SliceMaster{
 		host:   host,
 		path:   path,
-		shards: make([]*Shard, 0, 8),
-		_map:   make(map[string]string),
+		slices: make([]*Slice, 0, 8),
 		tree:   btree.New(64, nil),
 	}
 
@@ -97,62 +95,62 @@ func NewDB(host, path string) *DB {
 	return d
 }
 
-func (d *DB) Get(key string) *Shard {
+func (d *SliceMaster) SliceForKey(key string) *Slice {
 	slot := redcon.Slot(key)
 	d.mu.RLock()
-	idx := slot % len(d.shards)
-	shard := d.shards[idx]
+	idx := slot % len(d.slices)
+	shard := d.slices[idx]
 	d.mu.RUnlock()
 	return shard
 }
 
-func (d *DB) ShardLen() int {
+func (d *SliceMaster) SliceCount() int {
 	d.mu.RLock()
-	l := len(d.shards)
+	l := len(d.slices)
 	d.mu.RUnlock()
 	return l
 }
 
-func (d *DB) ShardID(key string) int {
+func (d *SliceMaster) SliceID(key string) int {
 	slot := redcon.Slot(key)
 	d.mu.RLock()
-	idx := slot % len(d.shards)
+	idx := slot % len(d.slices)
 	d.mu.RUnlock()
 	return idx
 }
 
-func (d *DB) Shard(id int) *Shard {
-	var shard *Shard
+func (d *SliceMaster) SliceForSlot(id int) *Slice {
+	var shard *Slice
 	d.mu.RLock()
 	if id == -1 {
-		shard = d.cluster
+		shard = d.master
 		d.mu.RUnlock()
 		return shard
 	}
-	if id < 0 || id >= len(d.shards) {
+	if id < 0 || id >= len(d.slices) {
 		d.mu.RUnlock()
 		return nil
 	}
-	shard = d.shards[id]
+	shard = d.slices[id]
 	d.mu.RUnlock()
 	return shard
 }
 
-func (d *DB) shardPath(id int) (string, error) {
+func (d *SliceMaster) shardPath(id int) (string, error) {
 	if d.path == ":memory:" {
 		return d.path, nil
 	} else {
 		var path string
 		if id == -1 {
-			path = filepath.Join(d.path, "cluster")
+			path = filepath.Join(d.path, "master")
 		} else {
-			path = filepath.Join(d.path, "shards", fmt.Sprintf("%d", id))
+			path = filepath.Join(d.path, "slices", fmt.Sprintf("%d", id))
 		}
 		return path, os.MkdirAll(path, 0700)
 	}
 }
 
-func (d *DB) OnStart() error {
+func (d *SliceMaster) OnStart() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -163,15 +161,15 @@ func (d *DB) OnStart() error {
 		return err
 	}
 
-	// Load cluster shard.
-	d.cluster = NewShard(-1, d.path == ":memory:", clusterPath, d.host, d)
-	err = d.cluster.Start()
+	// Load master shard.
+	d.master = NewSlice(-1, d.path == ":memory:", clusterPath, d.host, d)
+	err = d.master.Start()
 	if err != nil {
-		d.Logger.Error().Err(err).Msg("cluster db start failed")
+		d.Logger.Error().Err(err).Msg("master db start failed")
 		return err
 	}
 
-	if d.cluster.db.IsEmpty() {
+	if d.master.db.IsEmpty() {
 		for i := 0; i < 1; i++ {
 			shardPath, err := d.shardPath(i)
 
@@ -181,17 +179,17 @@ func (d *DB) OnStart() error {
 			}
 
 			// Create the first shard.
-			shard := NewShard(i, d.path == ":memory:", shardPath, d.host, d)
-			d.shards = append(d.shards, shard)
+			shard := NewSlice(i, d.path == ":memory:", shardPath, d.host, d)
+			d.slices = append(d.slices, shard)
 		}
 	}
 
-	for i := 0; i < len(d.shards); i++ {
-		err := d.shards[i].Start()
+	for i := 0; i < len(d.slices); i++ {
+		err := d.slices[i].Start()
 
 		if err != nil {
 			for a := 0; a < i; a++ {
-				d.shards[a].Stop()
+				d.slices[a].Stop()
 			}
 			d.Logger.Error().Err(err).Msgf("failed to start shard %d", i)
 			return err
@@ -200,29 +198,29 @@ func (d *DB) OnStart() error {
 	return nil
 }
 
-func (d *DB) OnStop() {
+func (d *SliceMaster) OnStop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	for i := 0; i < len(d.shards); i++ {
-		err := d.shards[i].Stop()
+	for i := 0; i < len(d.slices); i++ {
+		err := d.slices[i].Stop()
 
 		if err != nil {
 			d.Logger.Error().Err(err)
 		} else {
-			d.shards[i].Wait()
+			d.slices[i].Wait()
 		}
 	}
 }
 
-func (d *DB) Commit(ctx *cmd.Context) {
+func (d *SliceMaster) Commit(ctx *cmd.Context) {
 	if len(ctx.Changes) == 0 {
 		return
 	}
 
 	//LOOP:
 	for key, set := range ctx.Changes {
-		shard := d.Shard(key)
+		shard := d.SliceForSlot(key)
 		if shard == nil {
 			for i := 0; i < len(set.Cmds); i++ {
 				ctx.Out = redcon.AppendError(ctx.Out, fmt.Sprintf("ERR shard %d not on node", key))
@@ -268,7 +266,7 @@ func (d *DB) Commit(ctx *cmd.Context) {
 				//}
 
 				//begin := len(ctx.Out)
-				//ctx.DB = shard.db
+				//ctx.SliceMaster = shard.db
 				//ctx.Tx = tx
 
 				for i := 0; i < len(set.Cmds); i++ {
@@ -296,7 +294,7 @@ func (d *DB) Commit(ctx *cmd.Context) {
 	}
 }
 
-func (d *DB) Apply(shard *Shard, l *raft.Log) interface{} {
+func (d *SliceMaster) Apply(shard *Slice, l *raft.Log) interface{} {
 	tx, err := shard.db.Begin(true)
 	if err != nil {
 		shard.Logger.Panic().Err(err)
@@ -364,10 +362,6 @@ func (d *DB) Apply(shard *Shard, l *raft.Log) interface{} {
 	}
 }
 
-func castString(b []byte) string {
-	return *(*string)(unsafe.Pointer(&b))
-}
-
 type SetCmd struct {
 	cmd.WriteCmd
 
@@ -377,8 +371,9 @@ type SetCmd struct {
 
 func (c *SetCmd) Invoke(ctx *cmd.Context) []byte {
 	prev, replaced, err := ctx.Set.Set((item.StringKey)(c.Key), c.Value, 0)
+
 	if err != nil {
-		if err == item.ErrNotFound {
+		if err == sliced.ErrNotFound {
 			return ctx.AppendNull()
 		} else {
 			return ctx.AppendError("ERR data not available " + err.Error())
@@ -392,7 +387,7 @@ func (c *SetCmd) Invoke(ctx *cmd.Context) []byte {
 	}
 }
 
-func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
+func (d *SliceMaster) Parse(ctx *cmd.Context) cmd.Command {
 	//name := strings.ToUpper(castString(args[0]))
 	args := ctx.Args
 	key := ctx.Key
@@ -402,27 +397,27 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 	default:
 		return cmd.RAW(redcon.AppendError(nil, "ERR invalid command"))
 
-	//case txModeName:
-	//	switch strings.ToUpper(key) {
-	//	default:
-	//		ctx.Conn.durability = cmd.Medium
-	//	case "0":
-	//		ctx.Conn.durability = cmd.Medium
-	//	case "MEDIUM":
-	//		ctx.Conn.durability = cmd.Medium
-	//	case "1":
-	//		ctx.Conn.durability = cmd.High
-	//	case "2":
-	//		ctx.Conn.durability = cmd.High
-	//	case "HIGH":
-	//		ctx.Conn.durability = cmd.High
-	//	}
+		//case txModeName:
+		//	switch strings.ToUpper(key) {
+		//	default:
+		//		ctx.Conn.durability = cmd.Medium
+		//	case "0":
+		//		ctx.Conn.durability = cmd.Medium
+		//	case "MEDIUM":
+		//		ctx.Conn.durability = cmd.Medium
+		//	case "1":
+		//		ctx.Conn.durability = cmd.High
+		//	case "2":
+		//		ctx.Conn.durability = cmd.High
+		//	case "HIGH":
+		//		ctx.Conn.durability = cmd.High
+		//	}
 
 	case getName:
 		if len(ctx.Args) != 2 {
 			return cmd.ERR("ERR 1 parameter expected")
 		} else {
-			shard := d.Get(key)
+			shard := d.SliceForKey(key)
 			if shard == nil {
 				return cmd.ERR(fmt.Sprintf("ERR shard not on node"))
 			} else {
@@ -430,7 +425,7 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 				shard.RunSet(key, func(set *item.Set) {
 					val, err := set.Get((item.StringKey)(key))
 					if err != nil {
-						if err == buntdb.ErrNotFound {
+						if err == sliced.ErrNotFound {
 							_cmd = cmd.RAW(redcon.AppendNull(nil))
 						} else {
 							_cmd = cmd.ERR("ERR data not available " + err.Error())
@@ -448,63 +443,34 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 			return cmd.ERR("ERR invalid parameters")
 		}
 
-		//key := string(args[1])
-		//d.mu.Lock()
-		//item := d.tree.Get(&dbItem{key:key})
-		//ok := false
-		//var prev string
-		//var it *dbItem
-		//if item != nil {
-		//	it = item.(*dbItem)
-		//	prev = it.value
-		//	ok = true
-		//} else {
-		//	it = &dbItem{key: key, value: string(args[2])}
-		//	d.tree.ReplaceOrInsert(it)
-		//}
-		////prev, ok := d._map[key]
-		////d._map[key] = string(args[2])
-		//d.mu.Unlock()
-		//if !ok {
-		//	return cmd.RAW(redcon.AppendNull(nil))
-		//} else {
-		//	return cmd.RAW(redcon.AppendBulkString(nil, prev))
-		//}
-
 		value := string(args[2])
 
-		shard := d.Get(key)
+		shard := d.SliceForKey(key)
 		if shard == nil {
 			return cmd.ERR(fmt.Sprintf("ERR shard not on node"))
 		} else {
 			ctx.ShardID = shard.id
-			return &SetCmd{Key: key, Value: value}
+			var _cmd cmd.Command
+			shard.RunSet(key, func(set *item.Set) {
+				//return &SetCmd{Key: key, Value: value}
+				val, replaced, err := shard.GetSet().Set(item.StringKey(key), value, 0)
+				if err != nil {
+					if err == sliced.ErrNotFound {
+						_cmd = cmd.RAW(redcon.AppendNull(nil))
+					} else {
+						_cmd = cmd.ERR("ERR data not available " + err.Error())
+					}
+				} else {
+					if replaced {
+						_cmd = cmd.BulkString(val)
+					} else {
+						_cmd = cmd.RAW(redcon.AppendNull(nil))
+					}
+				}
+			})
+			return _cmd
 
-			//val, err := shard.db.Set(string(key), value)
-			//if err != nil {
-			//	if err == buntdb.ErrNotFound {
-			//		return cmd.AsyncWrite(redcon.AppendNull(nil))
-			//	} else {
-			//		return cmd.ERR("ERR data not available " + err.Error())
-			//	}
-			//} else {
-			//	return cmd.AsyncWrite(redcon.AppendBulkString(nil, val))
-			//}
 		}
-
-		//prev, replaced, err := tx.Set(key, value, nil)
-
-		//if leader {
-		//if err != nil {
-		//	out = redcon.AppendError(out, fmt.Sprintf("ERR %s", err.Error()))
-		//} else if replaced {
-		//	out = redcon.AppendBulkString(out, prev)
-		//} else {
-		//	out = redcon.AppendNull(out)
-		//}
-
-		//return cmd.RAW(redcon.AppendOK(nil))
-		//return cmd.WRITE
 
 	case delName:
 		return cmd.WRITE
@@ -512,20 +478,20 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 	case "SHRINK":
 
 		d.mu.RLock()
-		shards := make([]*Shard, len(d.shards))
-		copy(shards, d.shards)
+		slices := make([]*Slice, len(d.slices))
+		copy(slices, d.slices)
 		d.mu.RUnlock()
 
-		for _, shard := range shards {
+		for _, shard := range slices {
 			shard.Shrink()
 		}
 
 		return cmd.OK()
 
-	case "KEYS":
-		return cmd.RAW(redcon.AppendInt(nil, int64(d.shards[0].db.NumKeys())))
+		//case "KEYS":
+		//	return cmd.RAW(redcon.AppendInt(nil, int64(d.slices[0].db.NumKeys())))
 
-	case raftInstallName:
+	case raftInstallSnapshotName:
 		if len(args) < 3 {
 			return cmd.ERR("ERR 2 parameters expected")
 		} else {
@@ -533,7 +499,7 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 			if err != nil {
 				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
-				shard := d.Shard(id)
+				shard := d.SliceForSlot(id)
 				if shard == nil {
 					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
@@ -554,7 +520,7 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 			if err != nil {
 				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
-				shard := d.Shard(id)
+				shard := d.SliceForSlot(id)
 				if shard == nil {
 					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
@@ -577,7 +543,7 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 			if err != nil {
 				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
-				shard := d.Shard(id)
+				shard := d.SliceForSlot(id)
 				if shard == nil {
 					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
@@ -600,7 +566,7 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 			if err != nil {
 				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
-				shard := d.Shard(id)
+				shard := d.SliceForSlot(id)
 				if shard == nil {
 					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
@@ -622,7 +588,7 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 			if err != nil {
 				return cmd.ERR("ERR invalid int param for shard id")
 			} else {
-				shard := d.Shard(id)
+				shard := d.SliceForSlot(id)
 				if shard == nil {
 					return cmd.ERR(fmt.Sprintf("ERR shard %d not on node", id))
 				} else {
@@ -637,7 +603,7 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 		}
 
 	case raftLeaderName:
-		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftSlice(nil, args, func(shard *Slice) []byte {
 			leader, err := shard.Leader()
 			if err != nil {
 				return redcon.AppendError(nil, "ERR "+err.Error())
@@ -647,7 +613,7 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 		}))
 
 	case raftStatsName:
-		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftSlice(nil, args, func(shard *Slice) []byte {
 			stats := shard.Stats()
 			keys := make([]string, 0, len(stats))
 			for key := range stats {
@@ -664,14 +630,14 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 		}))
 
 	case raftStateName:
-		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftSlice(nil, args, func(shard *Slice) []byte {
 			state := shard.State()
 			return redcon.AppendBulkString(nil, state.String())
 		}))
 
 	case raftShrinkName:
-		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
-			err := shard.ShrinkLog()
+		return cmd.RAW(d.raftSlice(nil, args, func(slice *Slice) []byte {
+			err := slice.ShrinkLog()
 			if err != nil {
 				return redcon.AppendError(nil, "ERR "+err.Error())
 			} else {
@@ -680,14 +646,14 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 		}))
 
 	case raftSnapshotName:
-		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftSlice(nil, args, func(shard *Slice) []byte {
 			f := shard.raft.Snapshot()
 			_ = f
 			return redcon.AppendOK(nil)
 		}))
 
 	case raftSnapshotsName:
-		return cmd.RAW(d.raftShard(nil, args, func(shard *Shard) []byte {
+		return cmd.RAW(d.raftSlice(nil, args, func(shard *Slice) []byte {
 			f, err := shard.snapshots.List()
 			if err != nil {
 				return redcon.AppendError(nil, err.Error())
@@ -708,7 +674,7 @@ func (d *DB) Parse(ctx *cmd.Context) cmd.Command {
 	return _cmd
 }
 
-func (d *DB) raftShard(out []byte, args [][]byte, fn func(shard *Shard) []byte) []byte {
+func (d *SliceMaster) raftSlice(out []byte, args [][]byte, fn func(shard *Slice) []byte) []byte {
 	id := -1
 	var err error
 	if len(args) == 1 {
@@ -719,10 +685,10 @@ func (d *DB) raftShard(out []byte, args [][]byte, fn func(shard *Shard) []byte) 
 			return redcon.AppendError(out, "ERR invalid int param for shard id")
 		}
 	}
-	shard := d.Shard(id)
+	shard := d.SliceForSlot(id)
 	if shard == nil {
 		if id == -1 {
-			return redcon.AppendError(out, "ERR cluster not on node")
+			return redcon.AppendError(out, "ERR master not on node")
 		} else {
 			return redcon.AppendError(out, fmt.Sprintf("ERR shard %d not on node", id))
 		}

@@ -1,31 +1,30 @@
 // Package store provides a simple distributed key-value store. The keys and
 // associated values are changed via distributed consensus, meaning that the
-// values are changed only when a majority of nodes in the cluster agree on
+// values are changed only when a majority of nodes in the master agree on
 // the new value.
 //
 // Distributed consensus is provided via the Raft algorithm, specifically the
 // Hashicorp implementation.
-package db
+package slice
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
+	"strings"
 	"sync"
 	"time"
-	"errors"
 
 	"github.com/hashicorp/raft"
-	"github.com/pointc-io/sliced/db/store"
-	"github.com/pointc-io/sliced/db/buntdb"
-	"github.com/pointc-io/sliced/service"
 	"github.com/pointc-io/sliced"
-	"log"
-	"bytes"
-	"github.com/rs/zerolog"
-	"strings"
-	"github.com/pointc-io/sliced/item"
 	cmd "github.com/pointc-io/sliced/command"
+	"github.com/pointc-io/sliced/item"
+	"github.com/pointc-io/sliced/service"
+	"github.com/pointc-io/sliced/slice/store"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -39,24 +38,20 @@ var (
 	ErrNotLeader        = errors.New("ERR not leader")
 )
 
-type command struct {
-	Op    string `json:"op,omitempty"`
-	Key   string `json:"key,omitempty"`
-	Value string `json:"value,omitempty"`
-}
-
 type Applier interface {
-	Apply(shard *Shard, l *raft.Log) interface{}
+	Apply(shard *Slice, l *raft.Log) interface{}
 }
 
-// Shard is a partition of the total keyspace, where all changes are made via Raft consensus.
+// Slice is a partition of the total keyspace, where all changes are made via Raft consensus.
 // The entire database is a single BTree that may contain many sparse BTree indexes.
 // A shard is completely independent from every other shard.
 // Each shard has it's own Raft group and replication.
-type Shard struct {
+type Slice struct {
 	service.BaseService
 
 	id           int
+	low          int
+	high         int
 	Path         string
 	Bind         string
 	enableSingle bool
@@ -64,6 +59,7 @@ type Shard struct {
 
 	mu   sync.RWMutex
 	m    map[string]string // The key-value store for the system.
+	set  *item.Set
 	sets map[string]*item.Set
 
 	raft      *raft.Raft // The consensus mechanism
@@ -71,7 +67,6 @@ type Shard struct {
 	transport *RESPTransport
 	trans     raft.Transport
 	store     bigStore
-	db        *buntdb.DB
 
 	applier Applier
 
@@ -101,9 +96,9 @@ type shrinkable interface {
 	Shrink() error
 }
 
-// New returns a new Shard.
-func NewShard(id int, enableSingle bool, path, localID string, applier Applier) *Shard {
-	s := &Shard{
+// New returns a new Slice.
+func NewSlice(id int, enableSingle bool, path, localID string, applier Applier) *Slice {
+	s := &Slice{
 		id:           id,
 		Path:         path,
 		Bind:         localID,
@@ -126,9 +121,9 @@ func NewShard(id int, enableSingle bool, path, localID string, applier Applier) 
 }
 
 // Open opens the store. If enableSingle is set, and there are no existing peers,
-// then this node becomes the first node, and therefore leader, of the cluster.
+// then this node becomes the first node, and therefore leader, of the master.
 // localID should be the server identifier for this node.
-func (s *Shard) OnStart() error {
+func (s *Slice) OnStart() error {
 	// Setup Raft configuration.
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(s.localID)
@@ -146,12 +141,7 @@ func (s *Shard) OnStart() error {
 		dbpath = ":memory:"
 		//dbpath = filepath.Join(s.Path, "data.db")
 	}
-	s.db, err = buntdb.Open(dbpath)
-	if err != nil {
-		s.db.Close()
-		s.Logger.Error().Err(err).Msg("db open failed")
-		return err
-	}
+	_ = dbpath
 
 	// Create Transport
 	if s.Bind == "" {
@@ -197,7 +187,7 @@ func (s *Shard) OnStart() error {
 	}
 	var logname string
 	if s.id < 0 {
-		logname = "clusterdb"
+		logname = "master"
 	} else {
 		logname = fmt.Sprintf("shard-%d-log", s.id)
 	}
@@ -213,7 +203,7 @@ func (s *Shard) OnStart() error {
 		return fmt.Errorf("new log store: %s", err)
 	}
 
-	bootstrap := s.db.IsEmpty()
+	bootstrap := s.set.Length() == 0
 	if bootstrap {
 		//config.StartAsLeader = true
 	}
@@ -221,7 +211,6 @@ func (s *Shard) OnStart() error {
 	// Instantiate the Raft systems.
 	s.raft, err = raft.NewRaft(config, (*fsm)(s), s.store, s.store, s.snapshots, s.trans)
 	if err != nil {
-		s.db.Close()
 		s.transport.Stop()
 		s.store.Close()
 		s.Logger.Error().Err(err).Msg("new raft failed")
@@ -250,7 +239,7 @@ func (s *Shard) OnStart() error {
 	return nil
 }
 
-func (s *Shard) OnStop() {
+func (s *Slice) OnStop() {
 	if err := s.raft.Shutdown().Error(); err != nil {
 		s.Logger.Error().Err(err).Msg("raft shutdown error")
 	}
@@ -268,14 +257,11 @@ func (s *Shard) OnStop() {
 	if err := s.store.Close(); err != nil {
 		s.Logger.Error().Err(err).Msg("logstore close error")
 	}
-	if err := s.db.Close(); err != nil {
-		s.Logger.Error().Err(err).Msg("db close error")
-	}
 
 	close(s.observerCh)
 }
 
-func (s *Shard) GetSet() *item.Set {
+func (s *Slice) GetSet() *item.Set {
 	s.mu.RLock()
 	set, ok := s.sets[""]
 	if !ok {
@@ -286,7 +272,7 @@ func (s *Shard) GetSet() *item.Set {
 	return set
 }
 
-func (s *Shard) RunSet(key string, fn func (set *item.Set)) {
+func (s *Slice) RunSet(key string, fn func(set *item.Set)) {
 	s.mu.RLock()
 	set, ok := s.sets[""]
 	if !ok {
@@ -349,7 +335,7 @@ func (w *raftLoggerWriter) Write(buf []byte) (int, error) {
 	return l, nil
 }
 
-func (s *Shard) runObserver() {
+func (s *Slice) runObserver() {
 	for {
 		select {
 		case observation, ok := <-s.observerCh:
@@ -368,7 +354,7 @@ func (s *Shard) runObserver() {
 	}
 }
 
-func (s *Shard) Snapshot() error {
+func (s *Slice) Snapshot() error {
 	f := s.raft.Snapshot()
 	if err := f.Error(); err != nil {
 		return err
@@ -376,8 +362,13 @@ func (s *Shard) Snapshot() error {
 	return nil
 }
 
+// "SHRINK" client command.
+func (c *Slice) Shrink() error {
+	return ErrLogNotShrinkable
+}
+
 // "RAFTSHRINK" client command.
-func (s *Shard) ShrinkLog() error {
+func (s *Slice) ShrinkLog() error {
 	if s, ok := s.store.(shrinkable); ok {
 		err := s.Shrink()
 		if err != nil {
@@ -389,107 +380,42 @@ func (s *Shard) ShrinkLog() error {
 }
 
 // Only for RESPTransport RAFTAPPEND
-func (s *Shard) AppendEntries(o []byte, args [][]byte) ([]byte, error) {
+func (s *Slice) AppendEntries(o []byte, args [][]byte) ([]byte, error) {
 	return s.transport.handleAppendEntries(o, args)
 }
 
 // Only for RESPTransport RAFTVOTE
-func (s *Shard) RequestVote(o []byte, args [][]byte) ([]byte, error) {
+func (s *Slice) RequestVote(o []byte, args [][]byte) ([]byte, error) {
 	return s.transport.handleRequestVote(o, args)
 }
 
 // Only for RESPTransport RAFTINSTALL
-func (s *Shard) HandleInstallSnapshot(conn *cmd.Context, arg []byte) cmd.Command {
+func (s *Slice) HandleInstallSnapshot(conn *cmd.Context, arg []byte) cmd.Command {
 	return s.transport.HandleInstallSnapshot(conn, arg)
 }
 
-// "SHRINK" client command.
-func (c *Shard) Shrink() error {
-	if c.db != nil {
-		err := c.db.Shrink()
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	return ErrLogNotShrinkable
-}
-
-func (s *Shard) Leader() (string, error) {
+func (s *Slice) Leader() (string, error) {
 	return string(s.raft.Leader()), nil
 }
 
-func (s *Shard) Stats() map[string]string {
+func (s *Slice) Stats() map[string]string {
 	return s.raft.Stats()
 }
 
-func (s *Shard) State() raft.RaftState {
+func (s *Slice) State() raft.RaftState {
 	return s.raft.State()
 }
 
-// Get returns the value for the given key.
-func (s *Shard) Get(key string) (string, error) {
-	var val string = ""
-	var err error
-	s.db.View(func(tx *buntdb.Tx) error {
-		val, err = tx.Get(key)
-		return err
-	})
-	return val, err
-}
-
-// Set sets the value for the given key.
-func (s *Shard) Set(key, value string) error {
-	if s.raft.State() != raft.Leader {
-		return ErrNotLeader
-	}
-
-	c := &command{
-		Op:    "set",
-		Key:   key,
-		Value: value,
-	}
-	b, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
-
-	f := s.raft.Apply(b, raftTimeout)
-	return f.Error()
-}
-
-func (s *Shard) Update(cmd string) (interface{}, error) {
+func (s *Slice) Update(cmd string) (interface{}, error) {
 	if s.raft.State() != raft.Leader {
 		return nil, ErrNotLeader
 	}
-	err := s.db.Update(func(tx *buntdb.Tx) error {
-		return nil
-	})
-	return nil, err
-}
-
-// Delete deletes the given key.
-func (s *Shard) Delete(key string) error {
-	if s.raft.State() != raft.Leader {
-		return ErrNotLeader
-	}
-
-	c := &command{
-		Op:  "delete",
-		Key: key,
-	}
-	b, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
-
-	f := s.raft.Apply(b, raftTimeout)
-	return f.Error()
+	return nil, nil
 }
 
 // Join joins a node, identified by nodeID and located at addr, to this store.
 // The node must be ready to respond to Raft communications at that address.
-func (s *Shard) Join(nodeID, addr string) error {
+func (s *Slice) Join(nodeID, addr string) error {
 	s.Logger.Info().Str("node", nodeID).Str("addr", addr).Msg("node join request")
 
 	f := s.raft.AddVoter(raft.ServerID(nodeID), raft.ServerAddress(addr), 0, 0)
@@ -501,7 +427,7 @@ func (s *Shard) Join(nodeID, addr string) error {
 	return nil
 }
 
-func (s *Shard) Leave(nodeID, addr string) error {
+func (s *Slice) Leave(nodeID, addr string) error {
 	s.Logger.Info().Str("node", nodeID).Str("addr", addr).Msg("node leave request")
 
 	f := s.raft.RemoveServer(raft.ServerID(nodeID), 0, 0)
@@ -513,25 +439,11 @@ func (s *Shard) Leave(nodeID, addr string) error {
 	return nil
 }
 
-type fsm Shard
+type fsm Slice
 
 // Apply applies a Raft log entry to the key-value store.
 func (f *fsm) Apply(l *raft.Log) interface{} {
-	return f.applier.Apply((*Shard)(f), l)
-
-	//var c command
-	//if err := json.Unmarshal(l.Data, &c); err != nil {
-	//	f.Logger.Panic().Msgf("failed to unmarshal command: %s", err.Error())
-	//}
-	//
-	//switch c.Op {
-	//case "set":
-	//	return f.applySet(c.Key, c.Value)
-	//case "delete":
-	//	return f.applyDelete(c.Key)
-	//default:
-	//	panic(fmt.Sprintf("unrecognized command op: %s", c.Op))
-	//}
+	return f.applier.Apply((*Slice)(f), l)
 }
 
 // Snapshot returns a snapshot of the key-value store.
@@ -539,40 +451,30 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	return &fsmSnapshot{db: f.db}, nil
+	return &fsmSnapshot{}, nil
 }
 
 // Restore stores the key-value store to a previous state.
 func (f *fsm) Restore(rc io.ReadCloser) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-
-	db, err := buntdb.Open(":memory:")
-	if err != nil {
-		return err
-	}
-	db.Load(rc)
-
-	old := f.db
-
 	// Set the state from the snapshot, no lock required according to
 	// Hashicorp docs.
-	f.db = db
-	_ = old
+	//f.db = db
+
 	return nil
 }
 
 type fsmSnapshot struct {
-	db *buntdb.DB
 }
 
 func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 	err := func() error {
 		// Encode data.
-		err := f.db.Save(sink)
-		if err != nil {
-			return err
-		}
+		//err := f.db.Save(sink)
+		//if err != nil {
+		//	return err
+		//}
 
 		// Close the sink.
 		return sink.Close()

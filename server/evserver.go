@@ -94,7 +94,7 @@ func (s *EvServer) OnStart() error {
 	}
 
 	for i := 0; i < len(s.loops); i++ {
-		s.loops[i] = NewEventLoop(i, s)
+		s.loops[i] = newEventLoop(i, s)
 		err := s.loops[i].Start()
 		if err != nil {
 			s.Logger.Error().Err(err)
@@ -108,12 +108,12 @@ func (s *EvServer) OnStart() error {
 	}
 
 	s.Logger.Info().Str("host", s.host).Msg("listening")
-
 	return nil
 }
 
 func (s *EvServer) OnStop() {
 	s.action = evio.Shutdown
+
 	for _, loop := range s.loops {
 		err := loop.Stop()
 		if err != nil {
@@ -134,23 +134,21 @@ type EvLoop struct {
 	id   int
 	Host *EvServer
 	Ev   *evio.Server
-
-	conns map[int]*Conn
+	wg   sync.WaitGroup
+	conn map[int]*Conn
 
 	totalConns    metrics.Counter // counter for total connections
 	totalCommands metrics.Counter // counter for total commands
 	totalBytesIn  metrics.Counter
 	totalBytesOut metrics.Counter
-
-	wg sync.WaitGroup
 }
 
-func NewEventLoop(id int, server *EvServer) *EvLoop {
+func newEventLoop(id int, server *EvServer) *EvLoop {
 	e := &EvLoop{
-		id:    id,
-		Host:  server,
-		wg:    sync.WaitGroup{},
-		conns: make(map[int]*Conn),
+		id:   id,
+		Host: server,
+		wg:   sync.WaitGroup{},
+		conn: make(map[int]*Conn),
 
 		totalConns:    metrics.NewCounter(),
 		totalCommands: metrics.NewCounter(),
@@ -180,7 +178,7 @@ func (e *EvLoop) serve() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	conns := e.conns
+	conn := e.conn
 
 	var events evio.Events
 	var ev evio.Server
@@ -198,7 +196,7 @@ func (e *EvLoop) serve() {
 			ev:      e,
 			handler: s.handler,
 		}
-		conns[id] = c
+		conn[id] = c
 		c.durability = command.Medium
 		return
 	}
@@ -211,11 +209,11 @@ func (e *EvLoop) serve() {
 		return
 	}
 	events.Closed = func(id int, err error) (action evio.Action) {
-		c, ok := conns[id]
+		c, ok := conn[id]
 		if !ok {
 			return
 		}
-		delete(conns, id)
+		delete(conn, id)
 
 		// Notify connection.
 		c.closed()
@@ -226,17 +224,17 @@ func (e *EvLoop) serve() {
 	//	s.bytesOut.Inc(int64(amount))
 	//	return
 	//}
-	events.Detached = func(id int, conn net.Conn) (action evio.Action) {
-		c, ok := conns[id]
+	events.Detached = func(id int, co net.Conn) (action evio.Action) {
+		c, ok := conn[id]
 		if !ok {
 			return
 		}
-		delete(conns, id)
+		delete(conn, id)
 		_ = c
 		return
 	}
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
-		c, ok := conns[id]
+		c, ok := conn[id]
 		if !ok {
 			if id == -1 {
 				s.Logger.Error().Msg("shutdown action")
@@ -301,6 +299,7 @@ func (e *EvLoop) serve() {
 				c.statsTotalCommands++
 				cmdCount++
 
+				//ctx.Name = *(*string)(unsafe.Pointer(&ctx.Args[0]))
 				ctx.Name = strings.ToUpper(string(ctx.Args[0]))
 
 				if numArgs > 1 {

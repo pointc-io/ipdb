@@ -26,13 +26,13 @@ func TestPoolSanitize(t *testing.T) {
 			bts := p.Get(test.len, test.cap)
 			if n := cap(bts); n < test.cap {
 				t.Fatalf(
-					"unexpected capacity of slice returned from Get(): %d; want at least %d",
+					"unexpected capacity of slice returned from SliceForKey(): %d; want at least %d",
 					n, test.cap,
 				)
 			}
 			if n := len(bts); n != test.len {
 				t.Fatalf(
-					"unexpected length of slice returned from Get(): %d; want %d",
+					"unexpected length of slice returned from SliceForKey(): %d; want %d",
 					n, test.len,
 				)
 			}

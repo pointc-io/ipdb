@@ -1,5 +1,5 @@
 // Provides a raft transport using the Redis RESP protocol.
-package db
+package slice
 
 import (
 	"bufio"
@@ -48,7 +48,7 @@ type RESPTransport struct {
 	closed bool
 }
 
-func NewRaftTransport(shard *Shard) *RESPTransport {
+func NewRaftTransport(shard *Slice) *RESPTransport {
 	t := &RESPTransport{
 		id:       shard.id,
 		addr:     raft.ServerAddress(shard.Bind),

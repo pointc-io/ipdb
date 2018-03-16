@@ -197,9 +197,9 @@ func NewIndexer(
 	}
 }
 
-//type CompositeIndex struct {
-//	fields []*IndexField
-//}
+type CompositeIndex struct {
+	fields []*IndexField
+}
 //
 //func (i *CompositeIndex) Index(index *Index, item *ValueItem) IndexItem {
 //	l := len(i.fields)
@@ -221,7 +221,7 @@ func NewIndexer(
 //			return nil
 //		}
 //		return &Composite2Item{
-//			IndexItemBase: IndexItemBase{
+//			indexItem: indexItem{
 //				idx:   index,
 //				value: item,
 //			},
@@ -242,7 +242,7 @@ func NewIndexer(
 //			return nil
 //		}
 //		return &Composite3Item{
-//			IndexItemBase: IndexItemBase{
+//			indexItem: indexItem{
 //				idx:   index,
 //				value: item,
 //			},
@@ -269,7 +269,7 @@ func NewIndexer(
 //			return nil
 //		}
 //		return &Composite4Item{
-//			IndexItemBase: IndexItemBase{
+//			indexItem: indexItem{
 //				idx:   index,
 //				value: item,
 //			},
@@ -396,16 +396,16 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 	switch key := val.(type) {
 	default:
 		return &AnyItem{
-			IndexItemBase: IndexItemBase{
+			indexItem: indexItem{
 				idx:   index,
 				value: item,
 			},
-			Key: key,
+			key: key,
 		}
 	case IntKey:
 		if i.opts&IncludeInt != 0 {
 			return &IntItem{
-				IndexItemBase: IndexItemBase{
+				indexItem: indexItem{
 					idx:   index,
 					value: item,
 				},
@@ -418,7 +418,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 		if i.opts&IncludeFloat != 0 {
 			if i.opts&IndexFloatAsInt != 0 {
 				return &IntItem{
-					IndexItemBase: IndexItemBase{
+					indexItem: indexItem{
 						idx:   index,
 						value: item,
 					},
@@ -427,7 +427,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 			} else {
 				if i.opts&SortDesc != 0 {
 					return &FloatDescItem{
-						IndexItemBase: IndexItemBase{
+						indexItem: indexItem{
 							idx:   index,
 							value: item,
 						},
@@ -435,7 +435,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 					}
 				}
 				return &FloatItem{
-					IndexItemBase: IndexItemBase{
+					indexItem: indexItem{
 						idx:   index,
 						value: item,
 					},
@@ -452,7 +452,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 				key = key[:i.length]
 			}
 			return &StringItem{
-				IndexItemBase: IndexItemBase{
+				indexItem: indexItem{
 					idx:   index,
 					value: item,
 				},
@@ -465,11 +465,11 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 	case NilKey:
 		if i.opts&IncludeNil != 0 {
 			return &AnyItem{
-				IndexItemBase: IndexItemBase{
+				indexItem: indexItem{
 					idx:   index,
 					value: item,
 				},
-				Key: key,
+				key: key,
 			}
 		} else {
 			return nil
@@ -477,11 +477,11 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 	case Rect:
 		if i.opts&IncludeRect != 0 {
 			return &RectItem{
-				IndexItemBase: IndexItemBase{
+				indexItem: indexItem{
 					idx:   index,
 					value: item,
 				},
-				Key: key,
+				key: key,
 			}
 		} else {
 			return nil

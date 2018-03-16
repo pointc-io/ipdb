@@ -26,7 +26,7 @@ type Context struct {
 	Conn    Conn     // Connection
 	Out     []byte   // Output buffer to write to connection
 	Index   int      // Index of command
-	ShardID int      // Shard ID if calculated
+	ShardID int      // SliceForSlot ID if calculated
 	Name    string   // Current command name
 	Key     string   // Key if it exists
 	Packet  []byte   // Raw byte slice of current command

@@ -7,7 +7,7 @@ var DefaultPool = New(128, 65536)
 
 // Get returns probably reused slice of bytes with at least capacity of c and
 // exactly len of n.
-// Get is a wrapper around DefaultPool.Get().
+// SliceForKey is a wrapper around DefaultPool.SliceForKey().
 func Get(n, c int) []byte { return DefaultPool.Get(n, c) }
 
 // GetCap returns probably reused slice of bytes with at least capacity of n.

@@ -13,7 +13,7 @@ type Server struct {
 	host   string
 	path   string
 	server *EvServer
-	db     *db.DB
+	db     *slice.SliceMaster
 }
 
 func NewServer(host string, path string, eventLoops int) *Server {
@@ -29,7 +29,7 @@ func NewServer(host string, path string, eventLoops int) *Server {
 }
 
 func (s *Server) OnStart() error {
-	s.db = db.NewDB(s.host, s.path)
+	s.db = slice.NewDB(s.host, s.path)
 	err := s.db.Start()
 	if err != nil {
 		return err

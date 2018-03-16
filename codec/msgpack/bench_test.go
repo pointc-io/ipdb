@@ -176,7 +176,7 @@ func BenchmarkGJSON(b *testing.B) {
 	fmt.Println(gjson.Get(json, "attrs.phone").Type)
 
 	for i := 0; i < b.N; i++ {
-		//result := gjson.Get(json, "attrs.phone")
+		//result := gjson.SliceForKey(json, "attrs.phone")
 		gjson.Get(json, "id")
 
 		//fmt.Println(result)

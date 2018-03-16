@@ -38,19 +38,19 @@ func TestPoolGet(t *testing.T) {
 			act := p.Get(test.len, test.cap)
 			if n := len(act); n != test.len {
 				t.Errorf(
-					"Get(%d, _) retured %d-len slice; want %[1]d",
+					"SliceForKey(%d, _) retured %d-len slice; want %[1]d",
 					test.len, n,
 				)
 			}
 			if c := cap(act); c < test.cap {
 				t.Errorf(
-					"Get(_, %d) retured %d-cap slice; want at least %[1]d",
+					"SliceForKey(_, %d) retured %d-cap slice; want at least %[1]d",
 					test.cap, c,
 				)
 			}
 			if c := cap(act); test.exactCap != 0 && c != test.exactCap {
 				t.Errorf(
-					"Get(_, %d) retured %d-cap slice; want exact %d",
+					"SliceForKey(_, %d) retured %d-cap slice; want exact %d",
 					test.cap, c, test.exactCap,
 				)
 			}

@@ -2,7 +2,15 @@ package item
 
 import (
 	"time"
+
 	"github.com/pointc-io/sliced"
+)
+
+type DocumentOpts int
+
+const (
+	GZIP DocumentOpts = 1 << iota
+	LZ4
 )
 
 //
@@ -24,22 +32,13 @@ func (s *StringValue) Type() sliced.DataType {
 	return sliced.String
 }
 
-//
-//
-type JSONValue struct {
-	Value []byte
+type CompressedValue struct {
+	Size  int // Number of bytes the uncompressed value is
+	Value string
 }
 
-func (s *JSONValue) Type() sliced.DataType {
-	return sliced.JSON
-}
-
-type MsgPackValue struct {
-	Value []byte
-}
-
-func (s *MsgPackValue) Type() sliced.DataType {
-	return sliced.MsgPack
+func (s *CompressedValue) Type() sliced.DataType {
+	return sliced.String
 }
 
 //

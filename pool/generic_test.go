@@ -42,10 +42,10 @@ func TestGenericPoolGet(t *testing.T) {
 			p := New(test.min, test.max, test.init)
 			x, n := p.Get(test.get)
 			if n != test.expSize {
-				t.Errorf("Get(%d) = _, %d; want %d", test.get, n, test.expSize)
+				t.Errorf("SliceForKey(%d) = _, %d; want %d", test.get, n, test.expSize)
 			}
 			if !reflect.DeepEqual(x, test.expObj) {
-				t.Errorf("Get(%d) = %v, _; want %v", test.get, x, test.expObj)
+				t.Errorf("SliceForKey(%d) = %v, _; want %v", test.get, x, test.expObj)
 			}
 		})
 	}
