@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/pointc-io/sliced"
-	"github.com/pointc-io/sliced/codec/gjson"
-	"github.com/pointc-io/sliced/codec/sjson"
 	"github.com/pointc-io/sliced/index/btree"
 )
 
@@ -24,18 +22,9 @@ type ValueItem struct {
 	Indexes []IndexItem
 }
 
-func (dbi *ValueItem) Get(path string) gjson.Result {
-	return gjson.Get(dbi.Value, path)
-}
-
-// Set a field in the JSON document with a raw value
-func (dbi *ValueItem) SetRaw(path string, rawValue string) (string, error) {
-	return sjson.SetRaw(dbi.Value, path, rawValue)
-}
-
 // BTree key comparison.
 func (dbi *ValueItem) Less(than btree.Item, ctx interface{}) bool {
-	//return dbi.Key < than.(*Value).Key
+	//return dbi.K < than.(*Value).K
 	return dbi.Key.Less(than, ctx)
 }
 

@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+func TestKey2_Compare(t *testing.T) {
+	key := Key2{StringKey("0"), IntKey(0)}
+	key2 := Key2{StringKey("1"), IntKey(0)}
+
+	fmt.Println(key2.LessThan(key))
+}
+
 func TestParse(t *testing.T) {
 	testFloat(t, []byte("-0193."))
 	testFloat(t, []byte("-00193."))

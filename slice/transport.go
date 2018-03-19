@@ -435,10 +435,6 @@ type snapshotHandler struct {
 	downstream uint64
 }
 
-func (s *snapshotHandler) ShardID(key string) int {
-	return 0
-}
-
 func (s *snapshotHandler) Commit(ctx *cmd.Context) {
 }
 
@@ -487,7 +483,7 @@ func (t *RESPTransport) HandleInstallSnapshot(ctx *cmd.Context, arg []byte) cmd.
 	// Create new pipe
 	rd, wr := io.Pipe()
 
-	// Set rpc reader
+	// SortedSet rpc reader
 	rpc.Reader = rd
 	respChan := make(chan raft.RPCResponse)
 	rpc.RespChan = respChan

@@ -14,7 +14,8 @@ const (
 	IncludeRect
 	IncludeNil
 	IncludeAny
-	IndexFloatAsInt
+	IncludeFloatAsInt
+	CaseInsensitive
 	SortDesc
 )
 
@@ -120,6 +121,13 @@ func JSONIndexer(path string, opts IndexOpts) *IndexField {
 //
 //
 //
+func JSONComposite(fields... *IndexField) *CompositeIndex {
+	return &CompositeIndex{fields: fields}
+}
+
+//
+//
+//
 func IndexString(desc bool) IndexOpts {
 	o := IncludeString
 	if desc {
@@ -132,7 +140,7 @@ func IndexString(desc bool) IndexOpts {
 //
 //
 func IndexInt(desc bool) IndexOpts {
-	o := IncludeInt | IncludeFloat | IndexFloatAsInt
+	o := IncludeInt | IncludeFloat | IncludeFloatAsInt
 	if desc {
 		o |= SortDesc
 	}
@@ -197,94 +205,7 @@ func NewIndexer(
 	}
 }
 
-type CompositeIndex struct {
-	fields []*IndexField
-}
-//
-//func (i *CompositeIndex) Index(index *Index, item *ValueItem) IndexItem {
-//	l := len(i.fields)
-//	if l == 0 {
-//		return nil
-//	}
-//	switch len(i.fields) {
-//	case 0:
-//		return nil
-//	case 1:
-//		return i.fields[0].Index(index, item)
-//	case 2:
-//		key := i.fields[0].Key(index, item)
-//		if key == nil || key == SkipKey {
-//			return nil
-//		}
-//		key2 := i.fields[1].Key(index, item)
-//		if key2 == nil || key2 == SkipKey {
-//			return nil
-//		}
-//		return &Composite2Item{
-//			indexItem: indexItem{
-//				idx:   index,
-//				value: item,
-//			},
-//			Key:  key,
-//			Key2: key2,
-//		}
-//	case 3:
-//		key := i.fields[0].Key(index, item)
-//		if key == nil || key == SkipKey {
-//			return nil
-//		}
-//		key2 := i.fields[1].Key(index, item)
-//		if key2 == nil || key2 == SkipKey {
-//			return nil
-//		}
-//		key3 := i.fields[2].Key(index, item)
-//		if key3 == nil || key3 == SkipKey {
-//			return nil
-//		}
-//		return &Composite3Item{
-//			indexItem: indexItem{
-//				idx:   index,
-//				value: item,
-//			},
-//			Key:  key,
-//			Key2: key2,
-//			Key3: key3,
-//		}
-//
-//	case 4:
-//		key := i.fields[0].Key(index, item)
-//		if key == nil || key == SkipKey {
-//			return nil
-//		}
-//		key2 := i.fields[1].Key(index, item)
-//		if key2 == nil || key2 == SkipKey {
-//			return nil
-//		}
-//		key3 := i.fields[2].Key(index, item)
-//		if key3 == nil || key3 == SkipKey {
-//			return nil
-//		}
-//		key4 := i.fields[3].Key(index, item)
-//		if key4 == nil || key4 == SkipKey {
-//			return nil
-//		}
-//		return &Composite4Item{
-//			indexItem: indexItem{
-//				idx:   index,
-//				value: item,
-//			},
-//			Key:  key,
-//			Key2: key2,
-//			Key3: key3,
-//			Key4: key4,
-//		}
-//
-//	default:
-//		return nil
-//	}
-//}
-
-// Meta data to describe the behavior of the index dimension
+// Meta data to describe the behavior of an index dimension
 type IndexField struct {
 	name      string
 	length    int
@@ -337,48 +258,108 @@ func (i *IndexField) FieldAt(index int) *IndexField {
 }
 
 func (i *IndexField) Key(index *Index, item *ValueItem) Key {
-	k := i.projector(item)
-	if k == nil {
-		return SkipKey
+	// Project a key from the value
+	val := i.projector(item)
+
+	// Should we skip?
+	if val == SkipKey {
+		return nil
 	}
 
-	switch key := k.(type) {
+	// The general logic is duplicated with "K()"
+	// Only done to save a type assertion for the most
+	// likely path of a single field index.
+	switch key := val.(type) {
+	default:
+		return key
 	case IntKey:
 		if i.opts&IncludeInt != 0 {
-			return key
-		} else {
-			return SkipKey
-		}
-	case FloatKey:
-		if i.opts&IncludeFloat != 0 {
-			if i.opts&IndexFloatAsInt != 0 {
-				return IntKey(key)
+			if i.opts&SortDesc != 0 {
+				return IntDescKey(key)
 			} else {
 				return key
 			}
 		} else {
-			return SkipKey
+			return nil
+		}
+	case IntDescKey:
+		if i.opts&IncludeInt != 0 {
+			return key
+		} else {
+			return nil
+		}
+	case FloatKey:
+		if i.opts&IncludeFloat != 0 {
+			if i.opts&IncludeFloatAsInt != 0 {
+				if i.opts&SortDesc != 0 {
+					return IntDescKey(key)
+				} else {
+					return IntKey(key)
+				}
+			} else {
+				if i.opts&SortDesc != 0 {
+					return FloatDescKey(key)
+				} else {
+					return key
+				}
+			}
+		} else {
+			return nil
+		}
+	case FloatDescKey:
+		if i.opts&IncludeFloat != 0 {
+			if i.opts&IncludeFloatAsInt != 0 {
+				if i.opts&SortDesc != 0 {
+					return IntDescKey(key)
+				} else {
+					return IntKey(key)
+				}
+			} else {
+				if i.opts&SortDesc != 0 {
+					return FloatDescKey(key)
+				} else {
+					return key
+				}
+			}
+		} else {
+			return nil
 		}
 	case StringKey:
 		if i.opts&IncludeString != 0 {
 			// Truncate if necessary
 			if i.length > 0 && len(key) > i.length {
 				key = key[:i.length]
-				k = key
 			}
-			return k
+			if i.opts&SortDesc != 0 {
+				if i.opts&CaseInsensitive != 0 {
+					return StringCIDescKey(key)
+				} else {
+					return StringDescKey(key)
+				}
+			} else {
+				if i.opts&CaseInsensitive != 0 {
+					return StringCIKey(key)
+				} else {
+					return key
+				}
+			}
 		} else {
-			return SkipKey
+			return nil
 		}
+
 	case NilKey:
 		if i.opts&IncludeNil != 0 {
-			return Nil
+			return key
 		} else {
-			return SkipKey
+			return nil
+		}
+	case Rect:
+		if i.opts&IncludeRect != 0 {
+			return key
+		} else {
+			return nil
 		}
 	}
-
-	return k
 }
 
 func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
@@ -404,7 +385,29 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 		}
 	case IntKey:
 		if i.opts&IncludeInt != 0 {
-			return &IntItem{
+			if i.opts&SortDesc != 0 {
+				return &intDescItem{
+					indexItem: indexItem{
+						idx:   index,
+						value: item,
+					},
+					Key: IntDescKey(key),
+				}
+			} else {
+				return &intItem{
+					indexItem: indexItem{
+						idx:   index,
+						value: item,
+					},
+					Key: key,
+				}
+			}
+		} else {
+			return nil
+		}
+	case IntDescKey:
+		if i.opts&IncludeInt != 0 {
+			return &intDescItem{
 				indexItem: indexItem{
 					idx:   index,
 					value: item,
@@ -416,30 +419,41 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 		}
 	case FloatKey:
 		if i.opts&IncludeFloat != 0 {
-			if i.opts&IndexFloatAsInt != 0 {
-				return &IntItem{
-					indexItem: indexItem{
-						idx:   index,
-						value: item,
-					},
-					Key: IntKey(key),
+			if i.opts&IncludeFloatAsInt != 0 {
+				if i.opts&SortDesc != 0 {
+					return &intDescItem{
+						indexItem: indexItem{
+							idx:   index,
+							value: item,
+						},
+						Key: IntDescKey(key),
+					}
+				} else {
+					return &intItem{
+						indexItem: indexItem{
+							idx:   index,
+							value: item,
+						},
+						Key: IntKey(key),
+					}
 				}
 			} else {
 				if i.opts&SortDesc != 0 {
-					return &FloatDescItem{
+					return &floatDescItem{
 						indexItem: indexItem{
 							idx:   index,
 							value: item,
 						},
 						Key: FloatDescKey(key),
 					}
-				}
-				return &FloatItem{
-					indexItem: indexItem{
-						idx:   index,
-						value: item,
-					},
-					Key: key,
+				} else {
+					return &floatItem{
+						indexItem: indexItem{
+							idx:   index,
+							value: item,
+						},
+						Key: key,
+					}
 				}
 			}
 		} else {
@@ -451,12 +465,42 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 			if i.length > 0 && len(key) > i.length {
 				key = key[:i.length]
 			}
-			return &StringItem{
-				indexItem: indexItem{
-					idx:   index,
-					value: item,
-				},
-				Key: key,
+			if i.opts&SortDesc != 0 {
+				if i.opts&CaseInsensitive != 0 {
+					return &stringCIDescItem{
+						indexItem: indexItem{
+							idx:   index,
+							value: item,
+						},
+						Key: StringCIDescKey(key),
+					}
+				} else {
+					return &stringDescItem{
+						indexItem: indexItem{
+							idx:   index,
+							value: item,
+						},
+						K: StringDescKey(key),
+					}
+				}
+			} else {
+				if i.opts&CaseInsensitive != 0 {
+					return &stringCIItem{
+						indexItem: indexItem{
+							idx:   index,
+							value: item,
+						},
+						Key: StringCIKey(key),
+					}
+				} else {
+					return &stringItem{
+						indexItem: indexItem{
+							idx:   index,
+							value: item,
+						},
+						K: key,
+					}
+				}
 			}
 		} else {
 			return nil
@@ -476,7 +520,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 		}
 	case Rect:
 		if i.opts&IncludeRect != 0 {
-			return &RectItem{
+			return &rectItem{
 				indexItem: indexItem{
 					idx:   index,
 					value: item,
@@ -486,5 +530,73 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 		} else {
 			return nil
 		}
+	}
+}
+
+//
+//
+//
+type CompositeIndex struct {
+	fields []*IndexField
+}
+
+func (i *CompositeIndex) ParseArgs(offset int, buf [][]byte) Key {
+	switch len(i.fields) {
+	default:
+		return SkipKey
+	case 1:
+		return i.fields[0].ParseArgs(offset, buf)
+	case 2:
+		return Key2{
+			i.fields[0].ParseArgs(offset, buf),
+			i.fields[2].ParseArgs(offset+1, buf),
+		}
+	}
+}
+
+func (i *CompositeIndex) ParseArg(buf []byte) Key {
+	return Nil
+}
+
+func (i *CompositeIndex) Fields() int {
+	return len(i.fields)
+}
+
+func (i *CompositeIndex) FieldAt(index int) *IndexField {
+	if index < 0 || index > len(i.fields) {
+		return nil
+	}
+	return i.fields[index]
+}
+
+func (i *CompositeIndex) Index(index *Index, item *ValueItem) IndexItem {
+	l := len(i.fields)
+	if l == 0 {
+		return nil
+	}
+	switch len(i.fields) {
+	case 0:
+		return nil
+	case 1:
+		return i.fields[0].Index(index, item)
+	case 2:
+		key := i.fields[0].Key(index, item)
+		if key == nil || key == SkipKey {
+			return nil
+		}
+		key2 := i.fields[1].Key(index, item)
+		if key2 == nil || key2 == SkipKey {
+			return nil
+		}
+		return &composite2Item{
+			indexItem: indexItem{
+				idx:   index,
+				value: item,
+			},
+			K: Key2{key, key2},
+		}
+
+	default:
+		return nil
 	}
 }

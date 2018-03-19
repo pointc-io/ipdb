@@ -14,8 +14,6 @@ const (
 )
 
 type Handler interface {
-	ShardID(key string) int
-
 	Parse(ctx *Context) Command
 
 	Commit(ctx *Context)
@@ -33,7 +31,7 @@ type Context struct {
 	Args    [][]byte // Current command args
 
 	// Transactional holders
-	Set *item.Set
+	Set *item.SortedSet
 
 	Changes map[int]*ChangeSet
 }

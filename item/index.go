@@ -24,7 +24,7 @@ const (
 // idx represents a b-tree or r-tree idx and also acts as the
 // b-tree/r-tree context for itself.
 type Index struct {
-	db      *Set // the origin database
+	db      *SortedSet // the origin database
 	t       IndexType
 	btr     *btree.BTree // contains the items
 	rtr     *rtree.RTree // contains the items
@@ -178,7 +178,7 @@ func (idx *Index) rebuild() {
 // less function to handle the content format and comparison.
 // There are some default less function that can be used such as
 // IndexString, IndexBinary, etc.
-func (s *Set) CreateIndex(name, pattern string, indexer Indexer) error {
+func (s *SortedSet) CreateIndex(name, pattern string, indexer Indexer) error {
 	return s.createIndex(BTree, name, pattern, indexer)
 }
 
@@ -196,12 +196,12 @@ func (s *Set) CreateIndex(name, pattern string, indexer Indexer) error {
 // Thus min[0] must be less-than-or-equal-to max[0].
 // The IndexRect is a default function that can be used for the rect
 // parameter.
-func (s *Set) CreateSpatialIndex(name, pattern string, indexer Indexer) error {
+func (s *SortedSet) CreateSpatialIndex(name, pattern string, indexer Indexer) error {
 	return s.createIndex(RTree, name, pattern, indexer)
 }
 
 // createIndex is called by CreateIndex() and CreateSpatialIndex()
-func (s *Set) createIndex(
+func (s *SortedSet) createIndex(
 	idxType IndexType,
 	name string,
 	pattern string,
@@ -235,7 +235,7 @@ func (s *Set) createIndex(
 }
 
 // DropIndex removes an idx.
-func (s *Set) DropIndex(name string) error {
+func (s *SortedSet) DropIndex(name string) error {
 	if name == "" {
 		// cannot drop the default "keys" idx
 		return sliced.ErrInvalidOperation

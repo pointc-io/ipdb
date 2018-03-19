@@ -4,7 +4,7 @@ import (
 	"github.com/pointc-io/sliced/service"
 
 	"github.com/pointc-io/sliced"
-	"github.com/pointc-io/sliced/db"
+	"github.com/pointc-io/sliced/slice"
 )
 
 type Server struct {
@@ -13,7 +13,7 @@ type Server struct {
 	host   string
 	path   string
 	server *EvServer
-	db     *slice.SliceMaster
+	master *slice.SliceMaster
 }
 
 func NewServer(host string, path string, eventLoops int) *Server {
@@ -29,17 +29,17 @@ func NewServer(host string, path string, eventLoops int) *Server {
 }
 
 func (s *Server) OnStart() error {
-	s.db = slice.NewDB(s.host, s.path)
-	err := s.db.Start()
+	s.master = slice.NewMaster(s.host, s.path)
+	err := s.master.Start()
 	if err != nil {
 		return err
 	}
 
-	s.server.SetHandler(s.db)
+	s.server.SetHandler(s.master)
 
 	err = s.server.Start()
 	if err != nil {
-		s.db.Stop()
+		s.master.Stop()
 		return err
 	}
 

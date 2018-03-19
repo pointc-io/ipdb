@@ -8,14 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unsafe"
 
 	"github.com/hashicorp/raft"
-
 	"github.com/pointc-io/sliced"
 
 	cmd "github.com/pointc-io/sliced/command"
-	"github.com/pointc-io/sliced/db/buntdb"
 	"github.com/pointc-io/sliced/index/btree"
 	"github.com/pointc-io/sliced/item"
 	"github.com/pointc-io/sliced/redcon"
@@ -83,7 +80,7 @@ type SliceMaster struct {
 	tree *btree.BTree
 }
 
-func NewDB(host, path string) *SliceMaster {
+func NewMaster(host, path string) *SliceMaster {
 	d := &SliceMaster{
 		host:   host,
 		path:   path,
@@ -169,7 +166,7 @@ func (d *SliceMaster) OnStart() error {
 		return err
 	}
 
-	if d.master.db.IsEmpty() {
+	if d.master.set.Length() == 0 {
 		for i := 0; i < 1; i++ {
 			shardPath, err := d.shardPath(i)
 
@@ -285,7 +282,7 @@ func (d *SliceMaster) Commit(ctx *cmd.Context) {
 				//}
 
 				// Cleanup
-				//ctx.Set = nil
+				//ctx.SortedSet = nil
 
 				// Remove change set.
 				delete(ctx.Changes, key)
@@ -295,22 +292,18 @@ func (d *SliceMaster) Commit(ctx *cmd.Context) {
 }
 
 func (d *SliceMaster) Apply(shard *Slice, l *raft.Log) interface{} {
-	tx, err := shard.db.Begin(true)
-	if err != nil {
-		shard.Logger.Panic().Err(err)
-	}
 	data := l.Data
 	leader := shard.raft.State() == raft.Leader
 
 	var complete bool
 	var args [][]byte
 	var reply []byte
+	var err error
 
 	for {
 		complete, args, _, data, err = redcon.ReadNextCommand(data, args[:0])
 
 		if err != nil {
-			tx.Rollback()
 			shard.Logger.Panic().Err(err).Msgf("invalid raft log entry index %d", l.Index)
 			break
 		}
@@ -325,28 +318,9 @@ func (d *SliceMaster) Apply(shard *Slice, l *raft.Log) interface{} {
 			name := strings.ToUpper(string(args[0]))
 			switch name {
 			case "SET":
-				prev, replaced, err := tx.Set(string(args[1]), string(args[2]), nil)
-
-				if leader {
-					if err != nil {
-						reply = redcon.AppendError(reply, fmt.Sprintf("ERR %s", err.Error()))
-					} else if replaced {
-						reply = redcon.AppendBulkString(reply, prev)
-					} else {
-						reply = redcon.AppendNull(reply)
-					}
-				}
 
 			case "DEL":
-				prev, err := tx.Delete(string(args[1]))
 
-				if leader {
-					if err == buntdb.ErrNotFound {
-						reply = redcon.AppendNull(reply)
-					} else {
-						reply = redcon.AppendBulkString(reply, prev)
-					}
-				}
 			}
 
 			// First argument is the Cmd string.
@@ -354,7 +328,6 @@ func (d *SliceMaster) Apply(shard *Slice, l *raft.Log) interface{} {
 		}
 	}
 
-	tx.Commit()
 	if leader {
 		return reply
 	} else {
@@ -422,7 +395,7 @@ func (d *SliceMaster) Parse(ctx *cmd.Context) cmd.Command {
 				return cmd.ERR(fmt.Sprintf("ERR shard not on node"))
 			} else {
 				var _cmd cmd.Command
-				shard.RunSet(key, func(set *item.Set) {
+				shard.RunSet(key, func(set *item.SortedSet) {
 					val, err := set.Get((item.StringKey)(key))
 					if err != nil {
 						if err == sliced.ErrNotFound {
@@ -451,7 +424,7 @@ func (d *SliceMaster) Parse(ctx *cmd.Context) cmd.Command {
 		} else {
 			ctx.ShardID = shard.id
 			var _cmd cmd.Command
-			shard.RunSet(key, func(set *item.Set) {
+			shard.RunSet(key, func(set *item.SortedSet) {
 				//return &SetCmd{Key: key, Value: value}
 				val, replaced, err := shard.GetSet().Set(item.StringKey(key), value, 0)
 				if err != nil {

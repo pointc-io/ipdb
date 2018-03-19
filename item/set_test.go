@@ -10,17 +10,47 @@ import (
 
 func TestNew(t *testing.T) {
 	opts := IncludeString | IncludeInt
-	fmt.Println(opts & IndexFloatAsInt)
+	fmt.Println(opts & IncludeFloatAsInt)
 }
 
 func TestPoint(t *testing.T) {
 	fmt.Println(unsafe.Sizeof(StringKey("")))
 	fmt.Println(unsafe.Sizeof(""))
-	fmt.Println(unsafe.Sizeof(RectItem{}))
+	fmt.Println(unsafe.Sizeof(rectItem{}))
+}
+
+func TestComposite2(t *testing.T) {
+	db := NewSortedSet()
+
+	//db.CreateJSONStringIndex("last_name", "p:*", "name.last")
+	//db.CreateJSONIndex("last_name", "p:*", "name.last")
+	//db.CreateJSONSpatialIndex("fleet", "p:*", "location")
+	//db.CreateSpatialIndex("loc", "p:*", "age")
+	db.CreateIndex(
+		"last_name_age",
+		"*",
+		JSONComposite(
+			JSONIndexer("age", IncludeInt|IncludeFloat|IncludeFloatAsInt),
+			JSONIndexer("name.last", IncludeString|CaseInsensitive)))
+
+	db.Set(StringKey("p:1"), `{"name":{"first":"Tom","last":"Johnson"},"age":38, "location":[-115.567 33.532]}`, 0)
+	db.Set(StringKey("p:10"), `{"name":{"first":"Tom","last":"Alpha"},"age":38, "location":[-115.567 33.532]}`, 0)
+	db.Set(StringKey("p:101"), `{"name":{"first":"Tom","last":"Beta"},"age":38, "location":[-115.567 33.532]}`, 0)
+	db.Set(StringKey("p:1011"), `{"name":{"first":"Tom","last":"beta"},"age":38, "location":[-115.567 33.532]}`, 0)
+	db.Set(StringKey("p:2"), `{"name":{"first":"Janet","last":"Prichard"},"age":47, "location":[-116.671 35.735]}`, 0)
+	db.Set(StringKey("p:3"), `{"name":{"first":"Carol","last":"Anderson"},"age":52, "location":[-113.902 31.234]}`, 0)
+
+	db.Ascend("last_name_age", func(key IndexItem) bool {
+		//db.AscendRange("age", &floatItem{key: 30}, &floatItem{key: 51}, func(key Value) bool {
+		res := gjson.Get(key.Value().Value, "name.last")
+		age := gjson.Get(key.Value().Value, "age")
+		fmt.Printf("%s: %s\n", age.Raw, res.Raw)
+		return true
+	})
 }
 
 func TestSpatial(t *testing.T) {
-	db := New()
+	db := NewSortedSet()
 
 	//db.CreateJSONStringIndex("last_name", "p:*", "name.last")
 	//db.CreateJSONIndex("last_name", "p:*", "name.last")
@@ -31,14 +61,14 @@ func TestSpatial(t *testing.T) {
 	db.Set(StringKey("fleet:1:pos"), "[-116.671 35.735]", 0)
 	db.Set(StringKey("fleet:2:pos"), "[-113.902 31.234]", 0)
 
-	db.Nearby("fleet", "[-113 33]", func(key *RectItem, val *ValueItem, dist float64) bool {
+	db.Nearby("fleet", "[-113 33]", func(key *rectItem, val *ValueItem, dist float64) bool {
 		fmt.Println(val.Key, val.Value, dist)
 		return true
 	})
 }
 
 func TestIndexer(t *testing.T) {
-	db := New()
+	db := NewSortedSet()
 
 	//indexer := NewIndexer("name.last", data.String, false, JSONProjector("name.last"))
 	//db.CreateIndex("last_name", "p:*", indexer)
@@ -54,14 +84,14 @@ func TestIndexer(t *testing.T) {
 	db.Set(StringKey("p:2"), `{"name":{"first":"Janet","last":"Prichard"},"age":47, "location":[-116.671 35.735]}`, 0)
 	db.Set(StringKey("p:3"), `{"name":{"first":"Carol","last":"Anderson"},"age":52, "location":[-113.902 31.234]}`, 0)
 
-	db.Nearby("fleet", "[-113 33]", func(key *RectItem, value *ValueItem, dist float64) bool {
+	db.Nearby("fleet", "[-113 33]", func(key *rectItem, value *ValueItem, dist float64) bool {
 		fmt.Println(value.Key, value.Value, dist)
 		return true
 	})
 }
 
 func TestJsonSpatial(t *testing.T) {
-	db := New()
+	db := NewSortedSet()
 
 	//db.CreateJSONStringIndex("last_name", "p:*", "name.last")
 	//db.CreateJSONIndex("last_name", "p:*", "name.last")
@@ -73,7 +103,7 @@ func TestJsonSpatial(t *testing.T) {
 	db.Set(StringKey("p:3"), `("name":("first":"Carol","last":"Anderson"),"age":52, "location":[-113.902 31.234])`, 0)
 
 	//db.Nearby("fleet", "[-113 33]", func(key *rectKey, val *Value, dist float64) bool (
-	//	fmt.Println(val.Key, val.Value, dist)
+	//	fmt.Println(val.K, val.Value, dist)
 	//	return true
 	//))
 }
@@ -87,9 +117,9 @@ func TestRect(t *testing.T) {
 
 func TestSecondary(t *testing.T) {
 	//key := &FloatItem{}
-	//fmt.Println(unsafe.Offsetof(key.Key))
+	//fmt.Println(unsafe.Offsetof(key.K))
 
-	db := New()
+	db := NewSortedSet()
 
 	//db.CreateJSONStringIndex("last_name", "p:*", "name.last")
 	//db.CreateIndexM("last_name_age", "p:*", JSONString("name.last"), JSONNumber("age"))
@@ -147,14 +177,14 @@ func TestSecondary(t *testing.T) {
 	fmt.Println()
 	fmt.Println("Order by age range 30-50")
 	db.Ascend("age", func(key IndexItem) bool {
-		//db.AscendRange("age", &FloatItem{key: 30}, &FloatItem{key: 51}, func(key Value) bool {
+		//db.AscendRange("age", &floatItem{key: 30}, &floatItem{key: 51}, func(key Value) bool {
 		res := gjson.Get(key.Value().Value, "name.last")
 		age := gjson.Get(key.Value().Value, "age")
 		fmt.Printf("%s: %s\n", age.Raw, res.Raw)
 		return true
 	})
 	//db.AscendRange("age", FloatKey(30), FloatKey(52), func(key Value) bool {
-	//	//db.AscendRange("age", &FloatItem{key: 30}, &FloatItem{key: 51}, func(key Value) bool {
+	//	//db.AscendRange("age", &floatItem{key: 30}, &floatItem{key: 51}, func(key Value) bool {
 	//	res := gjson.SliceForKey(key.Value().Value, "name.last")
 	//	age := gjson.SliceForKey(key.Value().Value, "age")
 	//	fmt.Printf("%s: %s\n", age.Raw, res.Raw)
@@ -163,24 +193,24 @@ func TestSecondary(t *testing.T) {
 }
 
 func TestDesc(t *testing.T) {
-	db := New()
+	db := NewSortedSet()
 
 	//db.createSecondaryIndex("lastname", "p:*", &jsonKeyFactory{path: "name.last"}, nil)
 
-	//db.Set("p:10", `{"name":{"first":"Don","last":"Johnson"},"age":38}`, 0)
-	//db.Set("p:1", `{"name":{"first":"Tom","last":"Johnson"},"age":38}`, 0)
-	//db.Set("p:2", `{"name":{"first":"Janet","last":"Prichard"},"age":47}`, 0)
-	//db.Set("p:3", `{"name":{"first":"Carol","last":"Anderson"},"age":52}`, 0)
-	//db.Set("p:4", `{"name":{"first":"Alan","last":"Cooper"},"age":28}`, 0)
+	//db.SortedSet("p:10", `{"name":{"first":"Don","last":"Johnson"},"age":38}`, 0)
+	//db.SortedSet("p:1", `{"name":{"first":"Tom","last":"Johnson"},"age":38}`, 0)
+	//db.SortedSet("p:2", `{"name":{"first":"Janet","last":"Prichard"},"age":47}`, 0)
+	//db.SortedSet("p:3", `{"name":{"first":"Carol","last":"Anderson"},"age":52}`, 0)
+	//db.SortedSet("p:4", `{"name":{"first":"Alan","last":"Cooper"},"age":28}`, 0)
 	//
-	//db.Set("a:5", `9`, 0)
-	//db.Set("a:6", `47`, 0)
-	//db.Set("a:10", `47`, 0)
+	//db.SortedSet("a:5", `9`, 0)
+	//db.SortedSet("a:6", `47`, 0)
+	//db.SortedSet("a:10", `47`, 0)
 	//db.Delete("a:10")
-	//db.Set("a:7", `52`, 0)
-	//db.Set("a:8", `28`, 0)
-	//db.Set("a:9", `100`, 0)
-	//db.Set(StringKey{"a:9"}, `test`, 0)
+	//db.SortedSet("a:7", `52`, 0)
+	//db.SortedSet("a:8", `28`, 0)
+	//db.SortedSet("a:9", `100`, 0)
+	//db.SortedSet(StringKey{"a:9"}, `test`, 0)
 
 	//db.Delete("a:9")
 	item := db.get(StringKey(""))

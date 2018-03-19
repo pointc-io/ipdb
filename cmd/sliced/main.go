@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"os/user"
+	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -14,13 +17,10 @@ import (
 
 	//_ "go.uber.org/automaxprocs"
 
-	_ "github.com/rs/zerolog/log"
 	"github.com/pointc-io/sliced"
+	_ "github.com/rs/zerolog/log"
 
-	"runtime"
 	"github.com/pointc-io/sliced/server"
-	"os/user"
-	"path/filepath"
 	"github.com/rs/zerolog"
 )
 

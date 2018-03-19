@@ -13,13 +13,13 @@ import (
 
 // exctx is a simple b-tree context for ordering by expiration.
 type exctx struct {
-	db *Set
+	db *SortedSet
 }
 
 var defaultFreeList = new(btree.FreeList)
 
 //
-type Set struct {
+type SortedSet struct {
 	commitIndex uint64
 
 	hash   map[Key]*ValueItem
@@ -34,8 +34,8 @@ type Set struct {
 	itemMemoryUncompressed uint64
 }
 
-func New() *Set {
-	s := &Set{}
+func NewSortedSet() *SortedSet {
+	s := &SortedSet{}
 	s.hash = make(map[Key]*ValueItem)
 	s.items = btree.NewWithFreeList(btreeDegrees, defaultFreeList, nil)
 	s.exps = btree.NewWithFreeList(btreeDegrees, defaultFreeList, nil)
@@ -43,15 +43,15 @@ func New() *Set {
 	return s
 }
 
-func (s *Set) Length() uint64 {
+func (s *SortedSet) Length() uint64 {
 	return uint64(s.items.Len())
 }
 
-func (s *Set) insertIndex(idx *Index) {
+func (s *SortedSet) insertIndex(idx *Index) {
 	s.idxs[idx.name] = idx
 }
 
-func (s *Set) removeIndex(idx *Index) {
+func (s *SortedSet) removeIndex(idx *Index) {
 	// delete from the map.
 	// this is all that is needed to delete an idx.
 	delete(s.idxs, idx.name)
@@ -63,7 +63,7 @@ func (s *Set) removeIndex(idx *Index) {
 //
 // Executing a manual commit or rollback from inside the function will result
 // in a panic.
-func (s *Set) View(fn func() error) error {
+func (s *SortedSet) View(fn func() error) error {
 	s.mu.RLock()
 	err := fn()
 	s.mu.RUnlock()
@@ -78,7 +78,7 @@ func (s *Set) View(fn func() error) error {
 //
 // Executing a manual commit or rollback from inside the function will result
 // in a panic.
-func (s *Set) Update(fn func() error) error {
+func (s *SortedSet) Update(fn func() error) error {
 	s.mu.Lock()
 	err := fn()
 	s.mu.Unlock()
@@ -86,7 +86,7 @@ func (s *Set) Update(fn func() error) error {
 }
 
 // get return an value or nil if not found.
-func (s *Set) get(key Key) *ValueItem {
+func (s *SortedSet) get(key Key) *ValueItem {
 	item := s.items.Get(key)
 	if item != nil {
 		return item.(*ValueItem)
@@ -95,7 +95,7 @@ func (s *Set) get(key Key) *ValueItem {
 }
 
 // DeleteAll deletes all items from the database.
-func (s *Set) DeleteAll() error {
+func (s *SortedSet) DeleteAll() error {
 	// now reset the live database trees
 	s.items = btree.NewWithFreeList(btreeDegrees, defaultFreeList, nil)
 	s.exps = btree.NewWithFreeList(btreeDegrees, defaultFreeList, &exctx{s})
@@ -106,12 +106,12 @@ func (s *Set) DeleteAll() error {
 // insert performs inserts an value in to the database and updates
 // all indexes. If a previous value with the same key already exists, that value
 // will be replaced with the new one, and return the previous value.
-func (s *Set) insert(item *ValueItem) *ValueItem {
+func (s *SortedSet) insert(item *ValueItem) *ValueItem {
 	var pdbi *ValueItem
-	//prev, ok := s.hash[item.Key]
+	//prev, ok := s.hash[item.K]
 	//var prev *ValueItem
 	//ok := false
-	//s.hash[item.Key] = item
+	//s.hash[item.K] = item
 	prev := s.items.ReplaceOrInsert(item)
 	//_i := -1
 	if prev != nil {
@@ -172,7 +172,7 @@ func (s *Set) insert(item *ValueItem) *ValueItem {
 // with the matching key was found in the database, it will be removed and
 // returned to the caller. A nil return value means that the value was not
 // found in the database
-func (s *Set) delete(item *ValueItem) *ValueItem {
+func (s *SortedSet) delete(item *ValueItem) *ValueItem {
 	var pdbi *ValueItem
 	prev := s.items.Delete(item)
 	if prev != nil {
@@ -193,7 +193,7 @@ func (s *Set) delete(item *ValueItem) *ValueItem {
 //
 //
 //
-func (s *Set) Set(key Key, value string, expires int64) (previousValue string,
+func (s *SortedSet) Set(key Key, value string, expires int64) (previousValue string,
 	replaced bool, err error) {
 
 	item := &ValueItem{Key: key, Value: value}
@@ -214,7 +214,7 @@ func (s *Set) Set(key Key, value string, expires int64) (previousValue string,
 
 // SliceForKey returns a value for a key. If the value does not exist or if the value
 // has expired then ErrNotFound is returned.
-func (s *Set) Get(key Key) (val string, err error) {
+func (s *SortedSet) Get(key Key) (val string, err error) {
 	if s == nil {
 		return "", sliced.ErrTxClosed
 	}
@@ -232,7 +232,7 @@ func (s *Set) Get(key Key) (val string, err error) {
 //
 // Only a writable transaction can be used for this operation.
 // This operation is not allowed during iterations such as Ascend* & Descend*.
-func (s *Set) Delete(key Key) (val string, err error) {
+func (s *SortedSet) Delete(key Key) (val string, err error) {
 
 	item := s.delete(&ValueItem{Key: key})
 	if item == nil {
@@ -252,7 +252,7 @@ func (s *Set) Delete(key Key) (val string, err error) {
 //
 //
 //
-func (s *Set) scanPrimary(desc, gt, lt bool, start, stop Key,
+func (s *SortedSet) scanPrimary(desc, gt, lt bool, start, stop Key,
 	iterator func(value *ValueItem) bool) error {
 	// wrap a btree specific iterator around the user-defined iterator.
 	iter := func(item btree.Item) bool {
@@ -302,7 +302,7 @@ func (s *Set) scanPrimary(desc, gt, lt bool, start, stop Key,
 //
 //
 //
-func (s *Set) scanSecondary(desc, gt, lt bool, index string, start, stop Key,
+func (s *SortedSet) scanSecondary(desc, gt, lt bool, index string, start, stop Key,
 	iterator func(key IndexItem) bool) error {
 	// wrap a btree specific iterator around the user-defined iterator.
 	iter := func(item btree.Item) bool {
@@ -366,15 +366,15 @@ func (s *Set) scanSecondary(desc, gt, lt bool, index string, start, stop Key,
 // is represented by the rect string. This string will be processed by the
 // same bounds function that was passed to the CreateSpatialIndex() function.
 // An invalid idx will return an error.
-func (s *Set) Nearby(index, bounds string,
-	iterator func(key *RectItem, value *ValueItem, dist float64) bool) error {
+func (s *SortedSet) Nearby(index, bounds string,
+	iterator func(key *rectItem, value *ValueItem, dist float64) bool) error {
 	if index == "" {
 		// cannot search on keys tree. just return nil.
 		return nil
 	}
 	// // wrap a rtree specific iterator around the user-defined iterator.
 	iter := func(item rtree.Item, dist float64) bool {
-		dbi, ok := item.(*RectItem)
+		dbi, ok := item.(*rectItem)
 		if !ok {
 			return true
 		}
@@ -401,15 +401,15 @@ func (s *Set) Nearby(index, bounds string,
 // is represented by the rect string. This string will be processed by the
 // same bounds function that was passed to the CreateSpatialIndex() function.
 // An invalid idx will return an error.
-func (s *Set) Intersects(index, bounds string,
-	iterator func(key *RectItem, value *ValueItem) bool) error {
+func (s *SortedSet) Intersects(index, bounds string,
+	iterator func(key *rectItem, value *ValueItem) bool) error {
 	if index == "" {
 		// cannot search on keys tree. just return nil.
 		return nil
 	}
 	// wrap a rtree specific iterator around the user-defined iterator.
 	iter := func(item rtree.Item) bool {
-		dbi := item.(*RectItem)
+		dbi := item.(*rectItem)
 		return iterator(dbi, dbi.value)
 	}
 	idx := s.idxs[index]
@@ -432,7 +432,7 @@ func (s *Set) Intersects(index, bounds string,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) AscendPrimary(iterator func(value *ValueItem) bool) error {
+func (s *SortedSet) AscendPrimary(iterator func(value *ValueItem) bool) error {
 	return s.scanPrimary(false, false, false, MinKey, MaxKey, iterator)
 }
 
@@ -442,7 +442,7 @@ func (s *Set) AscendPrimary(iterator func(value *ValueItem) bool) error {
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) AscendGreaterOrEqualPrimary(pivot Key,
+func (s *SortedSet) AscendGreaterOrEqualPrimary(pivot Key,
 	iterator func(value *ValueItem) bool) error {
 	return s.scanPrimary(false, true, false, pivot, MaxKey, iterator)
 }
@@ -453,7 +453,7 @@ func (s *Set) AscendGreaterOrEqualPrimary(pivot Key,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) AscendLessThanPrimary(pivot Key,
+func (s *SortedSet) AscendLessThanPrimary(pivot Key,
 	iterator func(value *ValueItem) bool) error {
 	return s.scanPrimary(false, false, true, pivot, MaxKey, iterator)
 }
@@ -464,7 +464,7 @@ func (s *Set) AscendLessThanPrimary(pivot Key,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) AscendRangePrimary(greaterOrEqual, lessThan Key,
+func (s *SortedSet) AscendRangePrimary(greaterOrEqual, lessThan Key,
 	iterator func(value *ValueItem) bool) error {
 	return s.scanPrimary(
 		false, true, true, greaterOrEqual, lessThan, iterator)
@@ -476,7 +476,7 @@ func (s *Set) AscendRangePrimary(greaterOrEqual, lessThan Key,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) DescendPrimary(iterator func(value *ValueItem) bool) error {
+func (s *SortedSet) DescendPrimary(iterator func(value *ValueItem) bool) error {
 	return s.scanPrimary(true, false, false, MinKey, MinKey, iterator)
 }
 
@@ -486,7 +486,7 @@ func (s *Set) DescendPrimary(iterator func(value *ValueItem) bool) error {
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) DescendGreaterThanPrimary(pivot Key,
+func (s *SortedSet) DescendGreaterThanPrimary(pivot Key,
 	iterator func(value *ValueItem) bool) error {
 	return s.scanPrimary(true, true, false, pivot, MinKey, iterator)
 }
@@ -497,7 +497,7 @@ func (s *Set) DescendGreaterThanPrimary(pivot Key,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) DescendLessOrEqualPrimary(pivot Key,
+func (s *SortedSet) DescendLessOrEqualPrimary(pivot Key,
 	iterator func(value *ValueItem) bool) error {
 	return s.scanPrimary(true, false, true, pivot, MinKey, iterator)
 }
@@ -508,7 +508,7 @@ func (s *Set) DescendLessOrEqualPrimary(pivot Key,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) DescendRangePrimary(lessOrEqual, greaterThan Key,
+func (s *SortedSet) DescendRangePrimary(lessOrEqual, greaterThan Key,
 	iterator func(value *ValueItem) bool) error {
 	return s.scanPrimary(
 		true, true, true, lessOrEqual, greaterThan, iterator,
@@ -521,7 +521,7 @@ func (s *Set) DescendRangePrimary(lessOrEqual, greaterThan Key,
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) Ascend(index string, iterator IndexIterator) error {
+func (s *SortedSet) Ascend(index string, iterator IndexIterator) error {
 	return s.scanSecondary(false, false, false, index, MinKey, MaxKey, iterator)
 }
 
@@ -531,7 +531,7 @@ func (s *Set) Ascend(index string, iterator IndexIterator) error {
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) AscendGreaterOrEqual(index string, pivot Key, iterator IndexIterator) error {
+func (s *SortedSet) AscendGreaterOrEqual(index string, pivot Key, iterator IndexIterator) error {
 	return s.scanSecondary(false, true, false, index, pivot, MinKey, iterator)
 }
 
@@ -541,7 +541,7 @@ func (s *Set) AscendGreaterOrEqual(index string, pivot Key, iterator IndexIterat
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) AscendLessThan(index string, pivot Key, iterator IndexIterator) error {
+func (s *SortedSet) AscendLessThan(index string, pivot Key, iterator IndexIterator) error {
 	return s.scanSecondary(false, false, true, index, pivot, MinKey, iterator)
 }
 
@@ -551,7 +551,7 @@ func (s *Set) AscendLessThan(index string, pivot Key, iterator IndexIterator) er
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) AscendRange(index string, greaterOrEqual, lessThan Key, iterator IndexIterator) error {
+func (s *SortedSet) AscendRange(index string, greaterOrEqual, lessThan Key, iterator IndexIterator) error {
 	return s.scanSecondary(
 		false, true, true, index, greaterOrEqual, lessThan, iterator)
 }
@@ -562,7 +562,7 @@ func (s *Set) AscendRange(index string, greaterOrEqual, lessThan Key, iterator I
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) Descend(index string, iterator IndexIterator) error {
+func (s *SortedSet) Descend(index string, iterator IndexIterator) error {
 	return s.scanSecondary(true, false, false, index, MaxKey, MinKey, iterator)
 }
 
@@ -572,7 +572,7 @@ func (s *Set) Descend(index string, iterator IndexIterator) error {
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) DescendGreaterThan(index string, pivot Key, iterator IndexIterator) error {
+func (s *SortedSet) DescendGreaterThan(index string, pivot Key, iterator IndexIterator) error {
 	return s.scanSecondary(true, true, false, index, pivot, MinKey, iterator)
 }
 
@@ -582,7 +582,7 @@ func (s *Set) DescendGreaterThan(index string, pivot Key, iterator IndexIterator
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) DescendLessOrEqual(index string, pivot Key, iterator IndexIterator) error {
+func (s *SortedSet) DescendLessOrEqual(index string, pivot Key, iterator IndexIterator) error {
 	return s.scanSecondary(true, false, true, index, pivot, MinKey, iterator)
 }
 
@@ -592,7 +592,7 @@ func (s *Set) DescendLessOrEqual(index string, pivot Key, iterator IndexIterator
 // as specified by the less() function of the defined idx.
 // When an idx is not provided, the results will be ordered by the value key.
 // An invalid idx will return an error.
-func (s *Set) DescendRange(index string, lessOrEqual, greaterThan Key, iterator IndexIterator) error {
+func (s *SortedSet) DescendRange(index string, lessOrEqual, greaterThan Key, iterator IndexIterator) error {
 	return s.scanSecondary(
 		true, true, true, index, lessOrEqual, greaterThan, iterator,
 	)

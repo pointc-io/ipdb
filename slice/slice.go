@@ -59,8 +59,8 @@ type Slice struct {
 
 	mu   sync.RWMutex
 	m    map[string]string // The key-value store for the system.
-	set  *item.Set
-	sets map[string]*item.Set
+	set  *item.SortedSet
+	sets map[string]*item.SortedSet
 
 	raft      *raft.Raft // The consensus mechanism
 	snapshots raft.SnapshotStore
@@ -106,7 +106,7 @@ func NewSlice(id int, enableSingle bool, path, localID string, applier Applier) 
 		enableSingle: enableSingle,
 		applier:      applier,
 		m:            make(map[string]string),
-		sets:         make(map[string]*item.Set),
+		sets:         make(map[string]*item.SortedSet),
 		observerCh:   make(chan raft.Observation),
 	}
 	var name string
@@ -203,6 +203,7 @@ func (s *Slice) OnStart() error {
 		return fmt.Errorf("new log store: %s", err)
 	}
 
+	s.set = item.NewSortedSet()
 	bootstrap := s.set.Length() == 0
 	if bootstrap {
 		//config.StartAsLeader = true
@@ -261,25 +262,16 @@ func (s *Slice) OnStop() {
 	close(s.observerCh)
 }
 
-func (s *Slice) GetSet() *item.Set {
+func (s *Slice) GetSet() *item.SortedSet {
 	s.mu.RLock()
-	set, ok := s.sets[""]
-	if !ok {
-		set = item.New()
-		s.sets[""] = set
-	}
+	set := s.set
 	s.mu.RUnlock()
 	return set
 }
 
-func (s *Slice) RunSet(key string, fn func(set *item.Set)) {
+func (s *Slice) RunSet(key string, fn func(set *item.SortedSet)) {
 	s.mu.RLock()
-	set, ok := s.sets[""]
-	if !ok {
-		set = item.New()
-		s.sets[""] = set
-	}
-	fn(set)
+	fn(s.set)
 	s.mu.RUnlock()
 }
 
@@ -458,7 +450,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 func (f *fsm) Restore(rc io.ReadCloser) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// Set the state from the snapshot, no lock required according to
+	// SortedSet the state from the snapshot, no lock required according to
 	// Hashicorp docs.
 	//f.db = db
 

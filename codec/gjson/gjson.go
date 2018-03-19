@@ -908,7 +908,7 @@ func parseSquash(json string, i int) (int, string) {
 	return i, json[s:]
 }
 
-func parseObject(c *parseContext, i int, path string) (int, bool) {
+func parseObject(c *ParseContext, i int, path string) (int, bool) {
 	var pmatch, kesc, vesc, ok, hit bool
 	var key, val string
 	rp := parseObjectPath(path)
@@ -1119,7 +1119,7 @@ func queryMatches(rp *arrayPathResult, value Result) bool {
 	}
 	return false
 }
-func parseArray(c *parseContext, i int, path string) (int, bool) {
+func parseArray(c *ParseContext, i int, path string) (int, bool) {
 	var pmatch, vesc, ok, hit bool
 	var val string
 	var h int
@@ -1326,11 +1326,82 @@ func ForEachLine(json string, iterator func(line Result) bool) {
 	}
 }
 
-type parseContext struct {
+type ParseContext struct {
 	json  string
 	value Result
 	calcd bool
 	lines bool
+}
+
+func (p *ParseContext) Reset() {
+	p.value.Type = 0
+	p.value.Index = 0
+	p.value.Raw = ""
+	p.value.Str = ""
+}
+
+// Get searches json for the specified path.
+// A path is in dot syntax, such as "name.last" or "age".
+// When the value is found it's returned immediately.
+//
+// A path is a series of keys searated by a dot.
+// A key may contain special wildcard characters '*' and '?'.
+// To access an array value use the index as the key.
+// To get the number of elements in an array or to access a child path, use the '#' character.
+// The dot and wildcard character can be escaped with '\'.
+//
+//  {
+//    "name": {"first": "Tom", "last": "Anderson"},
+//    "age":37,
+//    "children": ["Sara","Alex","Jack"],
+//    "friends": [
+//      {"first": "James", "last": "Murphy"},
+//      {"first": "Roger", "last": "Craig"}
+//    ]
+//  }
+//  "name.last"          >> "Anderson"
+//  "age"                >> 37
+//  "children"           >> ["Sara","Alex","Jack"]
+//  "children.#"         >> 3
+//  "children.1"         >> "Alex"
+//  "child*.2"           >> "Jack"
+//  "c?ildren.0"         >> "Sara"
+//  "friends.#.first"    >> ["James","Roger"]
+//
+// This function expects that the json is well-formed, and does not validate.
+// Invalid json will not panic, but it may return back unexpected results.
+// If you are consuming JSON from an unpredictable source then you may want to
+// use the Valid function first.
+func GetWithContext(json, path string, c *ParseContext) Result {
+	var i int
+	//var c = &ParseContext{json: json}
+	c.json = json
+	if len(path) >= 2 && path[0] == '.' && path[1] == '.' {
+		c.lines = true
+		parseArray(c, 0, path[2:])
+	} else {
+		for ; i < len(c.json); i++ {
+			if c.json[i] == '{' {
+				i++
+				parseObject(c, i, path)
+				break
+			}
+			if c.json[i] == '[' {
+				i++
+				parseArray(c, i, path)
+				break
+			}
+		}
+	}
+	if len(c.value.Raw) > 0 && !c.calcd {
+		jhdr := *(*reflect.StringHeader)(unsafe.Pointer(&json))
+		rhdr := *(*reflect.StringHeader)(unsafe.Pointer(&(c.value.Raw)))
+		c.value.Index = int(rhdr.Data - jhdr.Data)
+		if c.value.Index < 0 || c.value.Index >= len(json) {
+			c.value.Index = 0
+		}
+	}
+	return c.value
 }
 
 // Get searches json for the specified path.
@@ -1367,7 +1438,7 @@ type parseContext struct {
 // use the Valid function first.
 func Get(json, path string) Result {
 	var i int
-	var c = &parseContext{json: json}
+	var c = &ParseContext{json: json}
 	if len(path) >= 2 && path[0] == '.' && path[1] == '.' {
 		c.lines = true
 		parseArray(c, 0, path[2:])

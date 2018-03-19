@@ -24,7 +24,7 @@ func runMemory(t *testing.T, f func(db *SliceMaster)) {
 }
 
 func run(t *testing.T, path string, f func(db *SliceMaster)) {
-	db = NewDB("", path)
+	db = NewMaster("", path)
 	err := db.Start()
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestDB(t *testing.T) {
 }
 
 func TestNewDB(t *testing.T) {
-	db := NewDB("", ":memory:")
+	db := NewMaster("", ":memory:")
 	err := db.Start()
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestNewDB(t *testing.T) {
 //
 //	// Key-Value
 //	p.db.Update(func(tx *buntdb.Tx) error {
-//		tx.Set(key, value, nil)
+//		tx.SortedSet(key, value, nil)
 //		return nil
 //	})
 //	p.db.View(func(tx *buntdb.Tx) error {
@@ -93,9 +93,9 @@ func TestNewDB(t *testing.T) {
 //
 //	// Spatial indexing
 //	p.db.Update(func(tx *buntdb.Tx) error {
-//		tx.Set("fleet:0:pos", "[-115.567 33.532]", nil)
-//		tx.Set("fleet:1:pos", "[-116.671 35.735]", nil)
-//		tx.Set("fleet:2:pos", "[-113.902 31.234]", nil)
+//		tx.SortedSet("fleet:0:pos", "[-115.567 33.532]", nil)
+//		tx.SortedSet("fleet:1:pos", "[-116.671 35.735]", nil)
+//		tx.SortedSet("fleet:2:pos", "[-113.902 31.234]", nil)
 //		tx.CreateSpatialIndex("fleet", "fleet:*:pos", buntdb.IndexRect)
 //		return nil
 //	})
@@ -108,12 +108,12 @@ func TestNewDB(t *testing.T) {
 //	})
 //
 //	p.db.Update(func(tx *buntdb.Tx) error {
-//		tx.Set("p:1", `{"name":{"first":"Tom","last":"Johnson"},"age":38}`, nil)
-//		tx.Set("p:2", `{"name":{"first":"Janet","last":"Prichard"},"age":47}`, nil)
-//		tx.Set("p:3", `{"name":{"first":"Carol","last":"Anderson"},"age":52}`, nil)
-//		tx.Set("p:4", `{"name":{"first":"Alan","last":"Cooper"},"age":28}`, nil)
-//		tx.Set("p:5", `{"name":{"first":"Sam","last":"Anderson"},"age":51}`, nil)
-//		tx.Set("p:6", `{"name":{"first":"Melinda","last":"Prichard"},"age":44}`, nil)
+//		tx.SortedSet("p:1", `{"name":{"first":"Tom","last":"Johnson"},"age":38}`, nil)
+//		tx.SortedSet("p:2", `{"name":{"first":"Janet","last":"Prichard"},"age":47}`, nil)
+//		tx.SortedSet("p:3", `{"name":{"first":"Carol","last":"Anderson"},"age":52}`, nil)
+//		tx.SortedSet("p:4", `{"name":{"first":"Alan","last":"Cooper"},"age":28}`, nil)
+//		tx.SortedSet("p:5", `{"name":{"first":"Sam","last":"Anderson"},"age":51}`, nil)
+//		tx.SortedSet("p:6", `{"name":{"first":"Melinda","last":"Prichard"},"age":44}`, nil)
 //		tx.CreateIndex("last_name_age", "p:*", buntdb.IndexJSON("name.last"), buntdb.IndexJSON("age"))
 //		tx.CreateIndex("last_name", "p:*", buntdb.IndexJSON("name.last"))
 //		tx.CreateIndex("age", "p:*", buntdb.IndexJSON("age"))

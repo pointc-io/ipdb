@@ -33,17 +33,17 @@ var (
 	False      = FalseKey{}
 )
 
-// Nil -> NilItem
-// False -> FalseItem
-// True -> TrueItem
-// Int -> IntItem
-// IntDesc -> IntDescItem
-// Float -> FloatItem
-// FloatDesc -> FloatDescItem
-// String -> StringItem
-// StringDesc -> StringDescItem
-// StringCI -> StringCIItem
-// StringCIDesc -> StringCIDescItem
+// Nil -> nilItem
+// False -> falseItem
+// True -> trueItem
+// Int -> intItem
+// IntDesc -> intDescItem
+// Float -> floatItem
+// FloatDesc -> floatDescItem
+// String -> stringItem
+// StringDesc -> stringDescItem
+// StringCI -> stringCIItem
+// StringCIDesc -> stringCIDescItem
 type Key interface {
 	// Satisfy the btree.Item interface so keys can be used directly as items
 	// This removes the need to convert a key into it's Item representation and
@@ -81,7 +81,7 @@ func ParseKeyBytes(from []byte) Key {
 }
 
 // Parses an unknown key without any opts and converts
-// to the most appropriate Key type.
+// to the most appropriate K type.
 func ParseKey(str string) Key {
 	l := len(str)
 
@@ -212,7 +212,8 @@ func JSONToKey(result gjson.Result) Key {
 //
 //
 //
-type NilKey struct {}
+type NilKey struct{}
+
 func (k NilKey) Parse(arg []byte) Key {
 	if len(arg) == 0 {
 		return Nil
@@ -234,7 +235,7 @@ func (k NilKey) LessThan(than Key) bool {
 }
 func (k NilKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 	switch to := than.(type) {
-	case *NilItem:
+	case *nilItem:
 		if item == nil {
 			return true
 		} else if to.value == nil {
@@ -254,7 +255,7 @@ func (k NilKey) Compare(key Key) int {
 //
 //type BoolKey struct{}
 //
-//func (k BoolKey) Parse(arg []byte) Key {
+//func (k BoolKey) Parse(arg []byte) K {
 //	switch len(arg) {
 //	case 0:
 //		return Nil
@@ -339,13 +340,13 @@ func (k NilKey) Compare(key Key) int {
 //func (k BoolKey) Less(than btree.Item, ctx interface{}) bool {
 //	return true
 //}
-//func (k BoolKey) LessThan(than Key) bool {
+//func (k BoolKey) LessThan(than K) bool {
 //	return true
 //}
 //func (k BoolKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 //	return true
 //}
-//func (k BoolKey) Compare(key Key) int {
+//func (k BoolKey) Compare(key K) int {
 //	return 1
 //}
 
@@ -353,6 +354,7 @@ func (k NilKey) Compare(key Key) int {
 //
 //
 type FalseKey struct{}
+
 func (k FalseKey) Type() sliced.DataType {
 	return sliced.Bool
 }
@@ -361,7 +363,7 @@ func (k FalseKey) Match(pattern string) bool {
 }
 func (k FalseKey) Less(than btree.Item, ctx interface{}) bool {
 	switch than.(type) {
-	case NilKey, *NilKey, *NilItem:
+	case NilKey, *NilKey, *nilItem:
 		return false
 	}
 	return true
@@ -375,9 +377,9 @@ func (k FalseKey) LessThan(than Key) bool {
 }
 func (k FalseKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 	switch to := than.(type) {
-	case NilKey, *NilKey, *NilItem:
+	case NilKey, *NilKey, *nilItem:
 		return false
-	case *FalseItem:
+	case *falseItem:
 		if item == nil {
 			return true
 		} else if to.value == nil {
@@ -402,6 +404,7 @@ func (k FalseKey) Compare(key Key) int {
 //
 //
 type TrueKey struct{}
+
 func (k TrueKey) Type() sliced.DataType {
 	return sliced.Bool
 }
@@ -410,7 +413,7 @@ func (k TrueKey) Match(pattern string) bool {
 }
 func (k TrueKey) Less(than btree.Item, ctx interface{}) bool {
 	switch than.(type) {
-	case FalseKey, *FalseKey, *FalseItem, NilKey, *NilKey, *NilItem:
+	case FalseKey, *FalseKey, *falseItem, NilKey, *NilKey, *nilItem:
 		return false
 	}
 	return true
@@ -424,9 +427,9 @@ func (k TrueKey) LessThan(than Key) bool {
 }
 func (k TrueKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 	switch to := than.(type) {
-	case FalseKey, *FalseKey, *FalseItem, NilKey, *NilKey, *NilItem:
+	case FalseKey, *FalseKey, *falseItem, NilKey, *NilKey, *nilItem:
 		return false
-	case *TrueItem:
+	case *trueItem:
 		if item == nil {
 			return true
 		} else if to.value == nil {
@@ -450,16 +453,16 @@ func (k TrueKey) Compare(key Key) int {
 	return -1
 }
 
-
 //
 //
 //
-type TimeKey struct {}
+type TimeKey struct{}
 
 //
 //
 //
 type StringMaxKey struct{}
+
 func (k StringMaxKey) Type() sliced.DataType {
 	return sliced.String
 }
@@ -483,6 +486,7 @@ func (k StringMaxKey) Compare(key Key) int {
 //
 //
 type StringKey string
+
 func (k StringKey) Parse(arg []byte) Key {
 	if arg == nil {
 		return Nil
@@ -508,13 +512,13 @@ func (k StringKey) Less(than btree.Item, ctx interface{}) bool {
 		return (string)(k) < (string)(t)
 	case *StringKey:
 		return (string)(k) < (string)(*t)
-	case *StringItem:
-		return (string)(k) < (string)(t.Key)
+	case *stringItem:
+		return (string)(k) < (string)(t.K)
 	case StringCIKey:
 		return CaseInsensitiveCompare((string)(k), (string)(t))
 	case *StringCIKey:
 		return CaseInsensitiveCompare((string)(k), (string)(*t))
-	case *StringCIItem:
+	case *stringCIItem:
 		return CaseInsensitiveCompare((string)(k), (string)(t.Key))
 	case StringMaxKey, *StringMaxKey:
 		return true
@@ -545,10 +549,10 @@ func (k StringKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 		return (string)(k) < (string)(t)
 		//case *StringKey:
 		//	return(string)(k) < (string)(t)
-	case *StringItem:
-		if (string)(k) < (string)(t.Key) {
+	case *stringItem:
+		if (string)(k) < (string)(t.K) {
 			return true
-		} else if (string)(k) > (string)(t.Key) {
+		} else if (string)(k) > (string)(t.K) {
 			return false
 		} else {
 			if item == nil {
@@ -556,10 +560,10 @@ func (k StringKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 			} else if t.value == nil {
 				return true
 			} else {
-				return item.Key.LessThan(t.Key)
+				return item.Key.LessThan(t.K)
 			}
 		}
-	case *StringCIItem:
+	case *stringCIItem:
 		if (string)(k) < (string)(t.Key) {
 			return true
 		} else if (string)(k) > (string)(t.Key) {
@@ -595,11 +599,193 @@ func (k StringKey) Compare(key Key) int {
 	return -1
 }
 
+//
+//
+//
+type StringDescKey string
+
+func (k StringDescKey) Parse(arg []byte) Key {
+	if arg == nil {
+		return Nil
+	}
+	return (StringKey)(*(*string)(unsafe.Pointer(&arg)))
+}
+func (k StringDescKey) Type() sliced.DataType {
+	return sliced.String
+}
+func (k StringDescKey) Match(pattern string) bool {
+	if pattern == "*" {
+		return true
+	} else {
+		return match.Match((string)(k), pattern)
+	}
+}
+func (k StringDescKey) Less(than btree.Item, ctx interface{}) bool {
+	switch t := than.(type) {
+	// Handle Primary Keys
+	case *ValueItem:
+		return k.LessThan(t.Key)
+	case StringDescKey:
+		return (string)(k) > (string)(t)
+	case *StringDescKey:
+		return (string)(k) > (string)(*t)
+	case *stringDescItem:
+		return (string)(k) > (string)(t.K)
+	case StringKey:
+		return (string)(k) > (string)(t)
+	case *StringKey:
+		return (string)(k) > (string)(*t)
+	case *stringItem:
+		return (string)(k) > (string)(t.K)
+	case StringCIKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringCIKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
+	case *stringCIItem:
+		return CaseInsensitiveCompare((string)(t.Key), (string)(k))
+	case StringCIDescKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringCIDescKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
+	case *stringCIDescItem:
+		return CaseInsensitiveCompare((string)(t.Key), (string)(k))
+	case StringMaxKey, *StringMaxKey:
+		return true
+	}
+	return false
+}
+func (k StringDescKey) LessThan(than Key) bool {
+	switch t := than.(type) {
+	case StringDescKey:
+		return (string)(k) > (string)(t)
+	case *StringDescKey:
+		return (string)(k) > (string)(*t)
+	case StringKey:
+		return (string)(k) > (string)(t)
+	case *StringKey:
+		return (string)(k) > (string)(*t)
+	case StringCIKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringCIKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
+	case StringCIDescKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringCIDescKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
+	case StringMaxKey, *StringMaxKey:
+		return true
+	}
+	return false
+}
+func (k StringDescKey) LessThanItem(than btree.Item, item *ValueItem) bool {
+	switch t := than.(type) {
+	case *ValueItem:
+		return k.LessThan(t.Key)
+
+	case StringDescKey:
+		return (string)(k) > (string)(t)
+	case *StringDescKey:
+		return (string)(k) > (string)(*t)
+	case *stringDescItem:
+		if (string)(k) > (string)(t.K) {
+			return true
+		} else if (string)(k) < (string)(t.K) {
+			return false
+		} else {
+			if item == nil {
+				return t.value != nil
+			} else if t.value == nil {
+				return true
+			} else {
+				return item.Key.LessThan(t.K)
+			}
+		}
+
+	case StringKey:
+		return (string)(k) > (string)(t)
+	case *StringKey:
+		return (string)(k) > (string)(*t)
+	case *stringItem:
+		if (string)(k) > (string)(t.K) {
+			return true
+		} else if (string)(k) < (string)(t.K) {
+			return false
+		} else {
+			if item == nil {
+				return t.value != nil
+			} else if t.value == nil {
+				return true
+			} else {
+				return item.Key.LessThan(t.K)
+			}
+		}
+	case StringCIKey:
+		return (string)(k) > (string)(t)
+	case *StringCIKey:
+		return (string)(k) > (string)(*t)
+	case *stringCIItem:
+		if (string)(k) > (string)(t.Key) {
+			return true
+		} else if (string)(k) < (string)(t.Key) {
+			return false
+		} else {
+			if item == nil {
+				return t.value != nil
+			} else if t.value == nil {
+				return true
+			} else {
+				return item.Key.LessThan(t.Key)
+			}
+		}
+	case StringCIDescKey:
+		return (string)(k) > (string)(t)
+	case *StringCIDescKey:
+		return (string)(k) > (string)(*t)
+	case *stringCIDescItem:
+		if (string)(k) > (string)(t.Key) {
+			return true
+		} else if (string)(k) < (string)(t.Key) {
+			return false
+		} else {
+			if item == nil {
+				return t.value != nil
+			} else if t.value == nil {
+				return true
+			} else {
+				return item.Key.LessThan(t.Key)
+			}
+		}
+	case StringMaxKey, *StringMaxKey:
+		return true
+	}
+	return false
+}
+func (k StringDescKey) Compare(key Key) int {
+	switch to := key.(type) {
+	case StringDescKey:
+		return strings.Compare((string)(to), (string)(k))
+	case *StringDescKey:
+		return strings.Compare((string)(*to), (string)(k))
+	case StringKey:
+		return strings.Compare((string)(to), (string)(k))
+	case *StringKey:
+		return strings.Compare((string)(*to), (string)(k))
+	case StringCIKey:
+		return strings.Compare((string)(to), (string)(k))
+	case *StringCIKey:
+		return strings.Compare((string)(*to), (string)(k))
+	case StringMaxKey, *StringMaxKey:
+		return -1
+	}
+
+	return -1
+}
 
 //
 //
 // Case Insensitive string
 type StringCIKey string
+
 func (k StringCIKey) Type() sliced.DataType {
 	return sliced.String
 }
@@ -629,9 +815,9 @@ func (k StringCIKey) Less(than btree.Item, ctx interface{}) bool {
 		return CaseInsensitiveCompare((string)(k), (string)(t))
 	case *StringKey:
 		return CaseInsensitiveCompare((string)(k), (string)(*t))
-	case *StringItem:
-		return CaseInsensitiveCompare((string)(k), (string)(t.Key))
-	case *StringCIItem:
+	case *stringItem:
+		return CaseInsensitiveCompare((string)(k), (string)(t.K))
+	case *stringCIItem:
 		return CaseInsensitiveCompare((string)(k), (string)(t.Key))
 	case StringMaxKey, *StringMaxKey:
 		return true
@@ -641,13 +827,21 @@ func (k StringCIKey) Less(than btree.Item, ctx interface{}) bool {
 func (k StringCIKey) LessThan(than Key) bool {
 	switch t := than.(type) {
 	case StringKey:
-		return (string)(k) < (string)(t)
+		return CaseInsensitiveCompare((string)(k), (string)(t))
 	case *StringKey:
-		return (string)(k) < (string)(*t)
+		return CaseInsensitiveCompare((string)(k), (string)(*t))
+	case StringDescKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringDescKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
 	case StringCIKey:
 		return CaseInsensitiveCompare((string)(k), (string)(t))
 	case *StringCIKey:
 		return CaseInsensitiveCompare((string)(k), (string)(*t))
+	case StringCIDescKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringCIDescKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
 	case StringMaxKey, *StringMaxKey:
 		return true
 	}
@@ -658,17 +852,17 @@ func (k StringCIKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 	case *ValueItem:
 		return k.LessThan(t.Key)
 	case StringKey:
-		return (string)(k) < (string)(t)
+		return CaseInsensitiveCompare((string)(k), (string)(t))
 	case *StringKey:
-		return (string)(k) < (string)(*t)
+		return CaseInsensitiveCompare((string)(k), (string)(*t))
 	case StringCIKey:
 		return CaseInsensitiveCompare((string)(k), (string)(t))
 	case *StringCIKey:
 		return CaseInsensitiveCompare((string)(k), (string)(*t))
-	case *StringItem:
-		if (string)(k) < (string)(t.Key) {
+	case *stringItem:
+		if (string)(k) < (string)(t.K) {
 			return true
-		} else if (string)(k) > (string)(t.Key) {
+		} else if (string)(k) > (string)(t.K) {
 			return false
 		} else {
 			if item == nil {
@@ -676,11 +870,11 @@ func (k StringCIKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 			} else if t.value == nil {
 				return true
 			} else {
-				return item.Key.LessThan(t.Key)
+				return item.Key.LessThan(t.K)
 			}
 		}
 
-	case *StringCIItem:
+	case *stringCIItem:
 		if CaseInsensitiveCompare((string)(k), (string)(t.Key)) {
 			return true
 		}
@@ -711,6 +905,189 @@ func (k StringCIKey) Compare(key Key) int {
 		return strings.Compare((string)(k), (string)(to))
 	case *StringCIKey:
 		return strings.Compare((string)(k), (string)(*to))
+	case StringMaxKey, *StringMaxKey:
+		return -1
+	}
+
+	return -1
+}
+
+//
+//
+// Case Insensitive string
+type StringCIDescKey string
+
+func (k StringCIDescKey) Type() sliced.DataType {
+	return sliced.String
+}
+func (k StringCIDescKey) Match(pattern string) bool {
+	if pattern == "*" {
+		return true
+	}
+
+	key := (string)(k)
+	for i := 0; i < len(key); i++ {
+		if key[i] >= 'A' && key[i] <= 'Z' {
+			key = strings.ToLower(key)
+			break
+		}
+	}
+	return match.Match(key, pattern)
+}
+func (k StringCIDescKey) Less(than btree.Item, ctx interface{}) bool {
+	switch t := than.(type) {
+	// Handle Primary Keys
+	case *ValueItem:
+		return k.LessThan(t.Key)
+	case StringDescKey:
+		return (string)(k) > (string)(t)
+	case *StringDescKey:
+		return (string)(k) > (string)(*t)
+	case *stringDescItem:
+		return (string)(k) > (string)(t.K)
+	case StringKey:
+		return (string)(k) > (string)(t)
+	case *StringKey:
+		return (string)(k) > (string)(*t)
+	case *stringItem:
+		return (string)(k) > (string)(t.K)
+	case StringCIKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringCIKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
+	case *stringCIItem:
+		return CaseInsensitiveCompare((string)(t.Key), (string)(k))
+	case StringCIDescKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringCIDescKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
+	case *stringCIDescItem:
+		return CaseInsensitiveCompare((string)(t.Key), (string)(k))
+	case StringMaxKey, *StringMaxKey:
+		return true
+	}
+	return false
+}
+func (k StringCIDescKey) LessThan(than Key) bool {
+	switch t := than.(type) {
+	case StringDescKey:
+		return (string)(k) > (string)(t)
+	case *StringDescKey:
+		return (string)(k) > (string)(*t)
+	case StringKey:
+		return (string)(k) > (string)(t)
+	case *StringKey:
+		return (string)(k) > (string)(*t)
+	case StringCIKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringCIKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
+	case StringCIDescKey:
+		return CaseInsensitiveCompare((string)(t), (string)(k))
+	case *StringCIDescKey:
+		return CaseInsensitiveCompare((string)(*t), (string)(k))
+	case StringMaxKey, *StringMaxKey:
+		return true
+	}
+	return false
+}
+func (k StringCIDescKey) LessThanItem(than btree.Item, item *ValueItem) bool {
+	switch t := than.(type) {
+	case *ValueItem:
+		return k.LessThan(t.Key)
+
+	case StringDescKey:
+		return (string)(k) > (string)(t)
+	case *StringDescKey:
+		return (string)(k) > (string)(*t)
+	case *stringDescItem:
+		if (string)(k) > (string)(t.K) {
+			return true
+		} else if (string)(k) < (string)(t.K) {
+			return false
+		} else {
+			if item == nil {
+				return t.value != nil
+			} else if t.value == nil {
+				return true
+			} else {
+				return item.Key.LessThan(t.K)
+			}
+		}
+
+	case StringKey:
+		return (string)(k) > (string)(t)
+	case *StringKey:
+		return (string)(k) > (string)(*t)
+	case *stringItem:
+		if (string)(k) > (string)(t.K) {
+			return true
+		} else if (string)(k) < (string)(t.K) {
+			return false
+		} else {
+			if item == nil {
+				return t.value != nil
+			} else if t.value == nil {
+				return true
+			} else {
+				return item.Key.LessThan(t.K)
+			}
+		}
+	case StringCIKey:
+		return (string)(k) > (string)(t)
+	case *StringCIKey:
+		return (string)(k) > (string)(*t)
+	case *stringCIItem:
+		if (string)(k) > (string)(t.Key) {
+			return true
+		} else if (string)(k) < (string)(t.Key) {
+			return false
+		} else {
+			if item == nil {
+				return t.value != nil
+			} else if t.value == nil {
+				return true
+			} else {
+				return item.Key.LessThan(t.Key)
+			}
+		}
+	case StringCIDescKey:
+		return (string)(k) > (string)(t)
+	case *StringCIDescKey:
+		return (string)(k) > (string)(*t)
+	case *stringCIDescItem:
+		if (string)(k) > (string)(t.Key) {
+			return true
+		} else if (string)(k) < (string)(t.Key) {
+			return false
+		} else {
+			if item == nil {
+				return t.value != nil
+			} else if t.value == nil {
+				return true
+			} else {
+				return item.Key.LessThan(t.Key)
+			}
+		}
+	case StringMaxKey, *StringMaxKey:
+		return true
+	}
+	return false
+}
+func (k StringCIDescKey) Compare(key Key) int {
+	switch to := key.(type) {
+	case StringDescKey:
+		return strings.Compare((string)(to), (string)(k))
+	case *StringDescKey:
+		return strings.Compare((string)(*to), (string)(k))
+	case StringKey:
+		return strings.Compare((string)(to), (string)(k))
+	case *StringKey:
+		return strings.Compare((string)(*to), (string)(k))
+	case StringCIKey:
+		return strings.Compare((string)(to), (string)(k))
+	case *StringCIKey:
+		return strings.Compare((string)(*to), (string)(k))
 	case StringMaxKey, *StringMaxKey:
 		return -1
 	}
@@ -759,6 +1136,7 @@ func (k StringCIKey) Compare(key Key) int {
 //
 //
 type IntKey int64
+
 func (k IntKey) String() string {
 	return strconv.Itoa(int(k))
 }
@@ -776,17 +1154,17 @@ func (k IntKey) Less(than btree.Item, ctx interface{}) bool {
 		return k < t
 	case *IntKey:
 		return k < *t
-	case *IntItem:
+	case *intItem:
 		return k < t.Key
 	case FloatKey:
 		return k < IntKey(t)
 	case *FloatKey:
 		return k < IntKey(*t)
-	case *FloatItem:
+	case *floatItem:
 		return k < IntKey(t.Key)
 	case FalseKey, *FalseKey, TrueKey, *TrueKey:
 		return false
-	case StringKey, *StringKey, *StringItem, StringMaxKey, *StringMaxKey:
+	case StringKey, *StringKey, *stringItem, StringMaxKey, *StringMaxKey:
 		return true
 	case nil, NilKey, *NilKey:
 		return false
@@ -820,7 +1198,7 @@ func (k IntKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 		return k < t
 	case *IntKey:
 		return k < *t
-	case *IntItem:
+	case *intItem:
 		if k < t.Key {
 			return true
 		} else if k > t.Key {
@@ -838,7 +1216,7 @@ func (k IntKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 		return k < IntKey(t)
 	case *FloatKey:
 		return k < IntKey(*t)
-	case *FloatItem:
+	case *floatItem:
 		tv := IntKey(t.Key)
 		if k < tv {
 			return true
@@ -853,7 +1231,7 @@ func (k IntKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 				return item.Key.LessThan(t.Key)
 			}
 		}
-	case StringKey, *StringKey, *StringItem, StringMaxKey, *StringMaxKey:
+	case StringKey, *StringKey, *stringItem, StringMaxKey, *StringMaxKey:
 		return true
 	case FalseKey, *FalseKey, TrueKey, *TrueKey, nil, NilKey, *NilKey:
 		return false
@@ -920,11 +1298,11 @@ func (k IntKey) Compare(key Key) int {
 	return 1
 }
 
-
 //
 //
 //
 type IntDescKey int64
+
 func (k IntDescKey) String() string {
 	return strconv.Itoa(int(k))
 }
@@ -939,24 +1317,24 @@ func (k IntDescKey) Less(than btree.Item, ctx interface{}) bool {
 	case *ValueItem:
 		return k.LessThan(t.Key)
 	case IntKey:
-		return k > (IntDescKey)(t)
+		return k > IntDescKey(t)
 	case *IntKey:
-		return k > (IntDescKey)(*t)
-	case *IntItem:
-		return k > (IntDescKey)(t.Key)
+		return k > IntDescKey(*t)
+	case *intItem:
+		return k > IntDescKey(t.Key)
 	case FloatKey:
-		return k > (IntDescKey)(t)
+		return k > IntDescKey(t)
 	case *FloatKey:
-		return k > (IntDescKey)(*t)
+		return k > IntDescKey(*t)
 	case FloatDescKey:
 		return k > IntDescKey(t)
 	case *FloatDescKey:
 		return k > IntDescKey(*t)
-	case *FloatItem:
+	case *floatItem:
 		return k > (IntDescKey)(t.Key)
 	case FalseKey, *FalseKey, TrueKey, *TrueKey:
 		return false
-	case StringKey, *StringKey, *StringItem, StringMaxKey, *StringMaxKey:
+	case StringKey, *StringKey, *stringItem, StringMaxKey, *StringMaxKey:
 		return true
 	case nil, NilKey, *NilKey:
 		return false
@@ -965,14 +1343,22 @@ func (k IntDescKey) Less(than btree.Item, ctx interface{}) bool {
 }
 func (k IntDescKey) LessThan(than Key) bool {
 	switch t := than.(type) {
+	case IntDescKey:
+		return k > t
+	case *IntDescKey:
+		return k > *t
 	case IntKey:
-		return k < (IntDescKey)(t)
+		return k > IntDescKey(t)
 	case *IntKey:
-		return k < (IntDescKey)(*t)
+		return k > IntDescKey(*t)
 	case FloatKey:
-		return k < (IntDescKey)(t)
+		return k > IntDescKey(t)
 	case *FloatKey:
-		return k < (IntDescKey)(*t)
+		return k > IntDescKey(*t)
+	case FloatDescKey:
+		return k > IntDescKey(t)
+	case *FloatDescKey:
+		return k > IntDescKey(*t)
 	case FalseKey, *FalseKey, TrueKey, *TrueKey:
 		return false
 	case StringKey, *StringKey, StringMaxKey, *StringMaxKey:
@@ -986,12 +1372,30 @@ func (k IntDescKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 	switch t := than.(type) {
 	case *ValueItem:
 		return k.LessThan(t.Key)
+	case IntDescKey:
+		return k > t
+	case *IntDescKey:
+		return k > *t
+	case *intDescItem:
+		if k < t.Key {
+			return true
+		} else if k > t.Key {
+			return false
+		} else {
+			if item == nil {
+				return t.value != nil
+			} else if t.value == nil {
+				return true
+			} else {
+				return item.Key.LessThan(t.Key)
+			}
+		}
 	case IntKey:
-		return k < (IntDescKey)(t)
+		return k > IntDescKey(t)
 	case *IntKey:
-		return k < (IntDescKey)(*t)
-	case *IntItem:
-		tk := (IntDescKey)(t.Key)
+		return k > IntDescKey(*t)
+	case *intItem:
+		tk := IntDescKey(t.Key)
 		if k < tk {
 			return true
 		} else if k > tk {
@@ -1006,11 +1410,11 @@ func (k IntDescKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 			}
 		}
 	case FloatKey:
-		return k < (IntDescKey)(t)
+		return k < IntDescKey(t)
 	case *FloatKey:
-		return k < (IntDescKey)(*t)
-	case *FloatItem:
-		tk := (IntDescKey)(t.Key)
+		return k < IntDescKey(*t)
+	case *floatItem:
+		tk := IntDescKey(t.Key)
 		if k < tk {
 			return true
 		} else if k > tk {
@@ -1024,7 +1428,7 @@ func (k IntDescKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 				return item.Key.LessThan(t.Key)
 			}
 		}
-	case StringKey, *StringKey, *StringItem, StringMaxKey, *StringMaxKey:
+	case StringKey, *StringKey, *stringItem, StringMaxKey, *StringMaxKey:
 		return true
 	case FalseKey, *FalseKey, TrueKey, *TrueKey, nil, NilKey, *NilKey:
 		return false
@@ -1033,52 +1437,68 @@ func (k IntDescKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 }
 func (k IntDescKey) Compare(key Key) int {
 	switch to := key.(type) {
-	case IntKey:
-		if k < (IntDescKey)(to) {
+	case IntDescKey:
+		if k > to {
 			return -1
-		} else if k > (IntDescKey)(to) {
+		} else if k < IntDescKey(to) {
+			return 1
+		} else {
+			return 0
+		}
+	case *IntDescKey:
+		if k > *to {
+			return -1
+		} else if k < *to {
+			return 1
+		} else {
+			return 0
+		}
+	case IntKey:
+		if k > IntDescKey(to) {
+			return -1
+		} else if k < IntDescKey(to) {
 			return 1
 		} else {
 			return 0
 		}
 	case *IntKey:
-		if k < (IntDescKey)(*to) {
+		if k > IntDescKey(*to) {
 			return -1
-		} else if k > (IntDescKey)(*to) {
+		} else if k < IntDescKey(*to) {
 			return 1
 		} else {
 			return 0
 		}
 	case FloatKey:
-		tv := (IntDescKey)(to)
-		if k < tv {
+		tv := IntDescKey(to)
+		if k > tv {
 			return -1
-		} else if k > tv {
+		} else if k < tv {
 			return 1
 		} else {
 			return 0
 		}
 	case *FloatKey:
-		tv := (IntDescKey)(*to)
-		if k < tv {
+		tv := IntDescKey(*to)
+		if k > tv {
 			return -1
-		} else if k > tv {
+		} else if k < tv {
 			return 1
 		} else {
 			return 0
 		}
 	case FloatDescKey:
-		if k > (IntDescKey)(to) {
+		if k > IntDescKey(to) {
 			return -1
-		} else if k < (IntDescKey)(to) {
+		} else if k < IntDescKey(to) {
 			return 1
 		} else {
 			return 0
 		}
 	case *FloatDescKey:
-		if k > (IntDescKey)(*to) {
+		if k > IntDescKey(*to) {
 			return -1
-		} else if k < (IntDescKey)(*to) {
+		} else if k < IntDescKey(*to) {
 			return 1
 		} else {
 			return 0
@@ -1095,6 +1515,7 @@ func (k IntDescKey) Compare(key Key) int {
 //
 //
 type FloatKey float64
+
 func (k FloatKey) Type() sliced.DataType {
 	return sliced.Float
 }
@@ -1113,17 +1534,17 @@ func (k FloatKey) Less(than btree.Item, ctx interface{}) bool {
 		return k < t
 	case *FloatKey:
 		return k < *t
-	case *FloatItem:
+	case *floatItem:
 		return k < t.Key
 	case IntKey:
 		return k < FloatKey(t)
 	case *IntKey:
 		return k < FloatKey(*t)
-	case *IntItem:
+	case *intItem:
 		return k < FloatKey(t.Key)
 	case FalseKey, *FalseKey, TrueKey, *TrueKey:
 		return false
-	case StringKey, *StringKey, *StringItem, StringMaxKey, *StringMaxKey:
+	case StringKey, *StringKey, *stringItem, StringMaxKey, *StringMaxKey:
 		return true
 	case nil, NilKey, *NilKey:
 		return false
@@ -1165,7 +1586,7 @@ func (k FloatKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 		return k < t
 	case *FloatKey:
 		return k < *t
-	case *FloatItem:
+	case *floatItem:
 		if k < t.Key {
 			return true
 		} else if k > t.Key {
@@ -1183,7 +1604,7 @@ func (k FloatKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 		return k < FloatKey(t)
 	case *IntKey:
 		return k < FloatKey(*t)
-	case *IntItem:
+	case *intItem:
 		tv := FloatKey(t.Key)
 		if k < tv {
 			return true
@@ -1198,7 +1619,7 @@ func (k FloatKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 				return item.Key.LessThan(t.value.Key)
 			}
 		}
-	case StringKey, *StringKey, *StringItem, StringMaxKey, *StringMaxKey:
+	case StringKey, *StringKey, *stringItem, StringMaxKey, *StringMaxKey:
 		return true
 	case FalseKey, *FalseKey, TrueKey, *TrueKey, nil, NilKey, *NilKey:
 		return false
@@ -1269,6 +1690,7 @@ func (k FloatKey) Compare(key Key) int {
 //
 //
 type FloatDescKey float64
+
 func (k FloatDescKey) Type() sliced.DataType {
 	return sliced.Float
 }
@@ -1281,17 +1703,17 @@ func (k FloatDescKey) Less(than btree.Item, ctx interface{}) bool {
 		return k > FloatDescKey(t)
 	case *FloatKey:
 		return k > FloatDescKey(*t)
-	case *FloatItem:
+	case *floatItem:
 		return k > FloatDescKey(t.Key)
 	case IntKey:
 		return k > FloatDescKey(t)
 	case *IntKey:
 		return k > FloatDescKey(*t)
-	case *IntItem:
+	case *intItem:
 		return k > FloatDescKey(t.Key)
 	case FalseKey, *FalseKey, TrueKey, *TrueKey:
 		return false
-	case StringKey, *StringKey, *StringItem, StringMaxKey, *StringMaxKey:
+	case StringKey, *StringKey, *stringItem, StringMaxKey, *StringMaxKey:
 		return true
 	case nil, NilKey, *NilKey:
 		return false
@@ -1331,7 +1753,7 @@ func (k FloatDescKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 		return k > FloatDescKey(t)
 	case *FloatKey:
 		return k > FloatDescKey(*t)
-	case *FloatItem:
+	case *floatItem:
 		if k > FloatDescKey(t.Key) {
 			return true
 		} else if k < FloatDescKey(t.Key) {
@@ -1349,7 +1771,7 @@ func (k FloatDescKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 		return k > FloatDescKey(t)
 	case *IntKey:
 		return k > FloatDescKey(*t)
-	case *IntItem:
+	case *intItem:
 		tv := FloatDescKey(t.Key)
 		if k > tv {
 			return true
@@ -1364,7 +1786,7 @@ func (k FloatDescKey) LessThanItem(than btree.Item, item *ValueItem) bool {
 				return item.Key.LessThan(t.Key)
 			}
 		}
-	case StringKey, *StringKey, *StringItem, StringMaxKey, *StringMaxKey:
+	case StringKey, *StringKey, *stringItem, StringMaxKey, *StringMaxKey:
 		return true
 	case FalseKey, *FalseKey, TrueKey, *TrueKey, nil, NilKey, *NilKey:
 		return false
@@ -1433,11 +1855,12 @@ func (k FloatDescKey) Compare(key Key) int {
 
 // Composite keys have 2 or more keys and the keys cannot be other composite keys
 //
-// Composite Key with 2 Elements
+// Composite K with 2 Elements
 type Key2 struct {
 	_1 Key
 	_2 Key
 }
+
 func (k Key2) Type() sliced.DataType {
 	return sliced.Any
 }
@@ -1448,11 +1871,61 @@ func (k Key2) Less(than btree.Item, ctx interface{}) bool {
 	switch t := than.(type) {
 	case *AnyItem:
 		return false
+	case *composite2Item:
+		switch k._1.Compare(t.K._1) {
+		case -1:
+			return true
+		case 1:
+			return false
+		}
+		switch k._2.Compare(t.K._2) {
+		case -1:
+			return true
+		case 1:
+			return false
+		default:
+			return false
+		}
 	case Key2:
-		if t._1.Less(t._1, ctx) {
+		if k._1.LessThan(t._1) {
 			return true
 		}
-		return t._2.Less(t._2, ctx)
+		return k._2.LessThan(t._2)
+	case *Key2:
+		if k._1.LessThan(t._1) {
+			return true
+		}
+		return k._2.LessThan(t._2)
+		//case Key3:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case *Key3:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case Key4:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case *Key4:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case Key5:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case *Key5:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
 	default:
 		return false
 	}
@@ -1461,9 +1934,45 @@ func (k Key2) Less(than btree.Item, ctx interface{}) bool {
 func (k Key2) LessThan(than Key) bool {
 	switch t := than.(type) {
 	case Key2:
-		return k._1.LessThan(t._1) && k._2.LessThan(t._2)
+		if k._1.LessThan(t._1) {
+			return true
+		}
+		return k._2.LessThan(t._2)
 	case *Key2:
-		return k._1.LessThan(t._1) && k._2.LessThan(t._2)
+		if k._1.LessThan(t._1) {
+			return true
+		}
+		return k._2.LessThan(t._2)
+		//case Key3:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case *Key3:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case Key4:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case *Key4:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case Key5:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
+		//case *Key5:
+		//	if k._1.LessThan(t._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(t._2)
 	default:
 		return false
 	}
@@ -1471,32 +1980,88 @@ func (k Key2) LessThan(than Key) bool {
 func (k Key2) LessThanItem(than btree.Item, item *ValueItem) bool {
 	switch to := than.(type) {
 	case *composite2Item:
-		if k._1.LessThan(to.K) {
+		switch k._1.Compare(to.K._1) {
+		case -1:
 			return true
-		} else {
-			switch k._2.Compare(to.K2) {
-			case -1:
+		case 1:
+			return false
+		}
+		switch k._2.Compare(to.K._2) {
+		case -1:
+			return true
+		case 1:
+			return false
+		default:
+			if item == nil {
+				return to.value != nil
+			} else if to.value == nil {
 				return true
-			case 1:
-				return false
-			default:
-				if item == nil {
-					return to.value != nil
-				} else if to.value == nil {
-					return true
-				} else {
-					return item.Key.LessThan(to.value.Key)
-				}
+			} else {
+				return item.Key.LessThan(to.value.Key)
 			}
 		}
-	case Key:
-		return k.LessThan(to)
+	case Key2:
+		if k._1.LessThan(to._1) {
+			return true
+		}
+		return k._2.LessThan(to._2)
+	case *Key2:
+		if k._1.LessThan(to._1) {
+			return true
+		}
+		return k._2.LessThan(to._2)
+		//case Key3:
+		//	if k._1.LessThan(to._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(to._2)
+		//case *Key3:
+		//	if k._1.LessThan(to._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(to._2)
+		//case Key4:
+		//	if k._1.LessThan(to._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(to._2)
+		//case *Key4:
+		//	if k._1.LessThan(to._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(to._2)
+		//case Key5:
+		//	if k._1.LessThan(to._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(to._2)
+		//case *Key5:
+		//	if k._1.LessThan(to._1) {
+		//		return true
+		//	}
+		//	return k._2.LessThan(to._2)
 
-	case *IntItem:
+	case *nilItem:
+		return false
+	case *trueItem:
+		return k._1.LessThan(True)
+	case *falseItem:
+		return k._1.LessThan(False)
+	case *intItem:
 		return k._1.LessThan(to.Key)
-	case *FloatItem:
+	case *intDescItem:
 		return k._1.LessThan(to.Key)
-	case *StringItem:
+	case *floatItem:
+		return k._1.LessThan(to.Key)
+	case *floatDescItem:
+		return k._1.LessThan(to.Key)
+	case *stringItem:
+		return k._1.LessThan(to.K)
+	case *stringDescItem:
+		return k._1.LessThan(to.K)
+	case *stringCIItem:
+		return k._1.LessThan(to.Key)
+	case *stringCIDescItem:
 		return k._1.LessThan(to.Key)
 	}
 	return false
