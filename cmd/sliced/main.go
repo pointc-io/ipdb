@@ -24,6 +24,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
+var version = "master"
 var port uint16
 var console bool
 var loops int
