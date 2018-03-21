@@ -19,39 +19,10 @@ type IndexItem interface {
 
 	// Internal
 	index() *Index
-	setIndex(idx *Index)
-	// Internal
 
+	Key() Key
+	PK() Key
 	Value() *ValueItem
-
-	//indexItem(idx *index, value *Value) Value
-
-	//IsComposite() bool
-	//ParseKeyBytes(raw string) Value
-	//ParseComposite(raw ... string) Value
-	//
-	////ParseBytes(raw []byte) Value
-	////ParseBytesComposite(raw... []byte) Value
-	////ConvertFloat64(f float64) Value
-	//Type() DataType
-
-	//// Number of keys
-	//Keys() int
-	//// First key
-	//K() string
-	//// K at a particular index
-	//// Only uses for composite indexes
-	//KeyAt(index int) string
-	//// First key as an int64 if possible
-	//// Otherwise, 0
-	//Int64() int64
-	//// First key as a float64 if possible
-	//// Otherwise, 0
-	//Float64() float64
-	////
-	//Int64At(index int) int64
-	////
-	//Float64At(index int) float64
 }
 
 //
@@ -65,8 +36,11 @@ type indexItem struct {
 func (i *indexItem) index() *Index {
 	return i.idx
 }
-func (i *indexItem) setIndex(index *Index) {
-	i.idx = index
+func (i *indexItem) Key() Key {
+	return Nil
+}
+func (i *indexItem) PK() Key {
+	return i.value.Key
 }
 func (i *indexItem) Value() *ValueItem {
 	return i.value
@@ -93,7 +67,9 @@ func (i *indexItem) Less(than btree.Item, ctx interface{}) bool {
 type nilItem struct {
 	indexItem
 }
-
+func (i *nilItem) Key() Key {
+	return Nil
+}
 func (k *nilItem) Less(than btree.Item, ctx interface{}) bool {
 	return true
 }
@@ -109,7 +85,9 @@ func (k *nilItem) Less(than btree.Item, ctx interface{}) bool {
 type falseItem struct {
 	indexItem
 }
-
+func (i *falseItem) Key() Key {
+	return False
+}
 func (k *falseItem) Less(than btree.Item, ctx interface{}) bool {
 	return False.Less(than, k.value)
 }
@@ -125,7 +103,9 @@ func (k *falseItem) Less(than btree.Item, ctx interface{}) bool {
 type trueItem struct {
 	indexItem
 }
-
+func (i *trueItem) Key() Key {
+	return True
+}
 func (k *trueItem) Less(than btree.Item, ctx interface{}) bool {
 	return True.Less(than, k.value)
 }
@@ -153,14 +133,14 @@ func (r *rectItem) Rect(ctx interface{}) (min []float64, max []float64) {
 }
 
 //
-type AnyItem struct {
-	indexItem
-	key Key
-}
-
-func (k *AnyItem) Less(than btree.Item, ctx interface{}) bool {
-	return k.key.LessThanItem(than, k.value)
-}
+//type anyItem struct {
+//	indexItem
+//	key Key
+//}
+//
+//func (k *anyItem) Less(than btree.Item, ctx interface{}) bool {
+//	return k.key.LessThanItem(than, k.value)
+//}
 
 //
 //
@@ -172,11 +152,13 @@ func (k *AnyItem) Less(than btree.Item, ctx interface{}) bool {
 
 type stringItem struct {
 	indexItem
-	K StringKey
+	key StringKey
 }
-
+func (i *stringItem) Key() Key {
+	return i.key
+}
 func (k *stringItem) Less(than btree.Item, ctx interface{}) bool {
-	return k.K.LessThanItem(than, k.value)
+	return k.key.LessThanItem(than, k.value)
 }
 
 //
@@ -189,11 +171,13 @@ func (k *stringItem) Less(than btree.Item, ctx interface{}) bool {
 
 type stringDescItem struct {
 	indexItem
-	K StringDescKey
+	key StringDescKey
 }
-
+func (i *stringDescItem) Key() Key {
+	return i.key
+}
 func (k *stringDescItem) Less(than btree.Item, ctx interface{}) bool {
-	return k.K.LessThanItem(than, k.value)
+	return k.key.LessThanItem(than, k.value)
 }
 
 //
@@ -206,11 +190,13 @@ func (k *stringDescItem) Less(than btree.Item, ctx interface{}) bool {
 
 type stringCIItem struct {
 	indexItem
-	Key StringCIKey
+	key StringCIKey
 }
-
+func (i *stringCIItem) Key() Key {
+	return i.key
+}
 func (k *stringCIItem) Less(than btree.Item, ctx interface{}) bool {
-	return k.Key.LessThanItem(than, k.value)
+	return k.key.LessThanItem(than, k.value)
 }
 
 //
@@ -223,48 +209,13 @@ func (k *stringCIItem) Less(than btree.Item, ctx interface{}) bool {
 
 type stringCIDescItem struct {
 	indexItem
-	Key StringCIDescKey
+	key StringCIDescKey
 }
-
+func (i *stringCIDescItem) Key() Key {
+	return i.key
+}
 func (k *stringCIDescItem) Less(than btree.Item, ctx interface{}) bool {
-	return k.Key.LessThanItem(than, k.value)
-}
-
-func stringLessInsensitive(a, b string) bool {
-	for i := 0; i < len(a) && i < len(b); i++ {
-		if a[i] >= 'A' && a[i] <= 'Z' {
-			if b[i] >= 'A' && b[i] <= 'Z' {
-				// both are uppercase, do nothing
-				if a[i] < b[i] {
-					return true
-				} else if a[i] > b[i] {
-					return false
-				}
-			} else {
-				// a is uppercase, convert a to lowercase
-				if a[i]+32 < b[i] {
-					return true
-				} else if a[i]+32 > b[i] {
-					return false
-				}
-			}
-		} else if b[i] >= 'A' && b[i] <= 'Z' {
-			// b is uppercase, convert b to lowercase
-			if a[i] < b[i]+32 {
-				return true
-			} else if a[i] > b[i]+32 {
-				return false
-			}
-		} else {
-			// neither are uppercase
-			if a[i] < b[i] {
-				return true
-			} else if a[i] > b[i] {
-				return false
-			}
-		}
-	}
-	return len(a) < len(b)
+	return k.key.LessThanItem(than, k.value)
 }
 
 //
@@ -277,20 +228,24 @@ func stringLessInsensitive(a, b string) bool {
 
 type intItem struct {
 	indexItem
-	Key IntKey
+	key IntKey
 }
-
+func (i *intItem) Key() Key {
+	return i.key
+}
 func (k *intItem) Less(than btree.Item, ctx interface{}) bool {
-	return k.Key.LessThanItem(than, k.value)
+	return k.key.LessThanItem(than, k.value)
 }
 
 type intDescItem struct {
 	indexItem
-	Key IntDescKey
+	key IntDescKey
 }
-
+func (i *intDescItem) Key() Key {
+	return i.key
+}
 func (k *intDescItem) Less(than btree.Item, ctx interface{}) bool {
-	return k.Key.LessThanItem(than, k.value)
+	return k.key.LessThanItem(than, k.value)
 }
 
 //
@@ -303,20 +258,24 @@ func (k *intDescItem) Less(than btree.Item, ctx interface{}) bool {
 
 type floatItem struct {
 	indexItem
-	Key FloatKey
+	key FloatKey
 }
-
+func (i *floatItem) Key() Key {
+	return i.key
+}
 func (k *floatItem) Less(than btree.Item, ctx interface{}) bool {
-	return k.Key.LessThanItem(than, k.value)
+	return k.key.LessThanItem(than, k.value)
 }
 
 type floatDescItem struct {
 	indexItem
-	Key FloatDescKey
+	key FloatDescKey
 }
-
+func (i *floatDescItem) Key() Key {
+	return i.key
+}
 func (k *floatDescItem) Less(than btree.Item, ctx interface{}) bool {
-	return k.Key.LessThanItem(than, k.value)
+	return k.key.LessThanItem(than, k.value)
 }
 
 //
@@ -327,13 +286,15 @@ func (k *floatDescItem) Less(than btree.Item, ctx interface{}) bool {
 //
 //
 
-type composite2Item struct {
+type key2Item struct {
 	indexItem
-	K  Key2
+	key Key2
 }
-
-func (i *composite2Item) Less(than btree.Item, ctx interface{}) bool {
-	return i.K.LessThanItem(than, i.value)
+func (i *key2Item) Key() Key {
+	return i.key
+}
+func (i *key2Item) Less(than btree.Item, ctx interface{}) bool {
+	return i.key.LessThanItem(than, i.value)
 }
 
 //type composite3Item struct {

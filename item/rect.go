@@ -14,6 +14,14 @@ import (
 type Rect struct {
 	Min, Max []float64
 }
+func (k Rect) CanIndex() bool { return true }
+func (k Rect) Keys() int      { return 1 }
+func (k Rect) KeyAt(index int) Key {
+	if index == 0 {
+		return k
+	}
+	return SkipKey
+}
 func (r Rect) Type() sliced.DataType {
 	return sliced.Rect
 }

@@ -395,7 +395,7 @@ func TestFastLogStore_SetUint64_GetUint64(t *testing.T) {
 			t.Fatalf("err: %s", err)
 		}
 
-		// Read back the value
+		// ReadSortedSet back the value
 		val, err := store.GetUint64(k)
 		if err != nil {
 			t.Fatalf("err: %s", err)

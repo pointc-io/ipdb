@@ -24,7 +24,7 @@ type Context struct {
 	Conn    Conn     // Connection
 	Out     []byte   // Output buffer to write to connection
 	Index   int      // Index of command
-	ShardID int      // SliceForSlot ID if calculated
+	SliceID int      // SliceForSlot ID if calculated
 	Name    string   // Current command name
 	Key     string   // Key if it exists
 	Packet  []byte   // Raw byte slice of current command
@@ -86,15 +86,15 @@ func (c *Context) HasChanges() bool {
 func (c *Context) AddChange(cmd Command, data []byte) {
 	if c.Changes == nil {
 		c.Changes = map[int]*ChangeSet{
-			c.ShardID: {
+			c.SliceID: {
 				Cmds: []Command{cmd},
 				Data: data,
 			},
 		}
 	} else {
-		set, ok := c.Changes[c.ShardID]
+		set, ok := c.Changes[c.SliceID]
 		if !ok {
-			c.Changes[c.ShardID] = &ChangeSet{
+			c.Changes[c.SliceID] = &ChangeSet{
 				Cmds: []Command{cmd},
 				Data: c.Packet,
 			}

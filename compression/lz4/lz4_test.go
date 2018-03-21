@@ -401,7 +401,7 @@ func TestNoWrite(t *testing.T) {
 		r := lz4.NewReader(rw)
 		n, err := r.Read(nil)
 		if err != nil {
-			t.Errorf("Read(): unexpected error: %v", err)
+			t.Errorf("ReadSortedSet(): unexpected error: %v", err)
 			t.FailNow()
 		}
 		if n != 0 {
@@ -412,7 +412,7 @@ func TestNoWrite(t *testing.T) {
 		buf := make([]byte, 16)
 		n, err = r.Read(buf)
 		if err != nil && err != io.EOF {
-			t.Errorf("Read(): unexpected error: %v", err)
+			t.Errorf("ReadSortedSet(): unexpected error: %v", err)
 			t.FailNow()
 		}
 		if n != 0 {
@@ -479,21 +479,21 @@ func TestFrame(t *testing.T) {
 				r := lz4.NewReader(rw)
 				n, err = r.Read(nil)
 				if err != nil {
-					t.Errorf("%s: Read(): unexpected error: %v", tag, err)
+					t.Errorf("%s: ReadSortedSet(): unexpected error: %v", tag, err)
 					t.FailNow()
 				}
 				if n != 0 {
-					t.Errorf("%s: Read(): expected 0 bytes read, got %d", tag, n)
+					t.Errorf("%s: ReadSortedSet(): expected 0 bytes read, got %d", tag, n)
 				}
 
 				buf := make([]byte, len(data))
 				n, err = r.Read(buf)
 				if err != nil && err != io.EOF {
-					t.Errorf("%s: Read(): unexpected error: %v", tag, err)
+					t.Errorf("%s: ReadSortedSet(): unexpected error: %v", tag, err)
 					t.FailNow()
 				}
 				if n != len(data) {
-					t.Errorf("%s: Read(): expected %d bytes read, got %d", tag, len(data), n)
+					t.Errorf("%s: ReadSortedSet(): expected %d bytes read, got %d", tag, len(data), n)
 				}
 				buf = buf[:n]
 				if !bytes.Equal(buf, data) {

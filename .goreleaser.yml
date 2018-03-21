@@ -1,0 +1,18 @@
+builds:
+  -
+    main: ./cmd/sliced/main.go
+    binary: sliced
+    goos:
+      - freebsd
+      - darwin
+      - linux
+    goarch:
+      - amd64
+
+# Archive customization
+archive:
+  format: tar.gz
+  replacements:
+    amd64: 64bit
+    darwin: macOS
+    linux: linux

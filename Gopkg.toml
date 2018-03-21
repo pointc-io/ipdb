@@ -74,46 +74,6 @@
   version = "1.0.0"
 
 [[constraint]]
-  branch = "master"
-  name = "github.com/tidwall/btree"
-
-[[constraint]]
-  name = "github.com/tidwall/buntdb"
-  version = "1.0.0"
-
-[[constraint]]
-  name = "github.com/tidwall/gjson"
-  version = "1.1.0"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/tidwall/grect"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/tidwall/match"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/tidwall/raft-boltdb"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/tidwall/raft-fastlog"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/tidwall/redcon"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/tidwall/redlog"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/tidwall/rtree"
-
-[[constraint]]
   name = "github.com/vmihailenco/msgpack"
   version = "3.2.8"
 

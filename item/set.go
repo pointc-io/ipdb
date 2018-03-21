@@ -30,15 +30,18 @@ type SortedSet struct {
 	mu     sync.RWMutex
 
 	// Stats
-	itemMemory uint64
+	itemMemory             uint64
 	itemMemoryUncompressed uint64
 }
 
 func NewSortedSet() *SortedSet {
+	return NewSortedSetWithFreelist(defaultFreeList)
+}
+
+func NewSortedSetWithFreelist(list *btree.FreeList) *SortedSet {
 	s := &SortedSet{}
-	s.hash = make(map[Key]*ValueItem)
-	s.items = btree.NewWithFreeList(btreeDegrees, defaultFreeList, nil)
-	s.exps = btree.NewWithFreeList(btreeDegrees, defaultFreeList, nil)
+	s.items = btree.NewWithFreeList(btreeDegrees, list, nil)
+	s.exps = btree.NewWithFreeList(btreeDegrees, list, nil)
 	s.idxs = make(map[string]*Index)
 	return s
 }
@@ -108,10 +111,6 @@ func (s *SortedSet) DeleteAll() error {
 // will be replaced with the new one, and return the previous value.
 func (s *SortedSet) insert(item *ValueItem) *ValueItem {
 	var pdbi *ValueItem
-	//prev, ok := s.hash[item.K]
-	//var prev *ValueItem
-	//ok := false
-	//s.hash[item.K] = item
 	prev := s.items.ReplaceOrInsert(item)
 	//_i := -1
 	if prev != nil {
@@ -128,6 +127,10 @@ func (s *SortedSet) insert(item *ValueItem) *ValueItem {
 		for _, sec := range item.Indexes {
 			if sec != nil {
 				sec.index().remove(sec)
+				idxItem := sec.index().indexer.Index(sec.index(), item)
+				if idxItem != nil {
+					sec.index().btr.ReplaceOrInsert(idxItem)
+				}
 			}
 		}
 	}
@@ -136,29 +139,31 @@ func (s *SortedSet) insert(item *ValueItem) *ValueItem {
 		// expires tree
 		s.exps.ReplaceOrInsert(item)
 	}
-	for _, idx := range s.idxs {
-		if !idx.match(item.Key) {
-			continue
-		}
-
-		sk := idx.indexer.Index(idx, item)
-		if sk == nil {
-			continue
-		}
-
-		item.Indexes = append(item.Indexes, sk)
-
-		if idx.btr != nil {
-			if sk != nil {
-				idx.btr.ReplaceOrInsert(sk)
-			} else {
-				// Ignored.
+	if prev == nil {
+		for _, idx := range s.idxs {
+			if !idx.match(item.Key) {
+				continue
 			}
-		} else if idx.rtr != nil {
-			if sk != nil {
-				idx.rtr.Insert(sk)
-			} else {
-				// Ignored.
+
+			sk := idx.indexer.Index(idx, item)
+			if sk == nil {
+				continue
+			}
+
+			item.Indexes = append(item.Indexes, sk)
+
+			if idx.btr != nil {
+				if sk != nil {
+					idx.btr.ReplaceOrInsert(sk)
+				} else {
+					// Ignored.
+				}
+			} else if idx.rtr != nil {
+				if sk != nil {
+					idx.rtr.Insert(sk)
+				} else {
+					// Ignored.
+				}
 			}
 		}
 	}
@@ -195,6 +200,11 @@ func (s *SortedSet) delete(item *ValueItem) *ValueItem {
 //
 func (s *SortedSet) Set(key Key, value string, expires int64) (previousValue string,
 	replaced bool, err error) {
+	var prev *ValueItem
+	//prev = s.get(key)
+	//if prev != nil {
+	//	return prev.Value, true, nil
+	//}
 
 	item := &ValueItem{Key: key, Value: value}
 	if expires > 0 {
@@ -203,7 +213,7 @@ func (s *SortedSet) Set(key Key, value string, expires int64) (previousValue str
 		item.Expires = expires
 	}
 	// Insert the value into the keys tree.
-	prev := s.insert(item)
+	prev = s.insert(item)
 
 	if prev == nil {
 		return "", false, nil
@@ -367,7 +377,7 @@ func (s *SortedSet) scanSecondary(desc, gt, lt bool, index string, start, stop K
 // same bounds function that was passed to the CreateSpatialIndex() function.
 // An invalid idx will return an error.
 func (s *SortedSet) Nearby(index, bounds string,
-	iterator func(key *rectItem, value *ValueItem, dist float64) bool) error {
+	iterator func(key Rect, value *ValueItem, dist float64) bool) error {
 	if index == "" {
 		// cannot search on keys tree. just return nil.
 		return nil
@@ -378,7 +388,7 @@ func (s *SortedSet) Nearby(index, bounds string,
 		if !ok {
 			return true
 		}
-		return iterator(dbi, dbi.value, dist)
+		return iterator(dbi.key, dbi.value, dist)
 	}
 	idx := s.idxs[index]
 	if idx == nil {
@@ -603,43 +613,3 @@ func (s *SortedSet) DescendRange(index string, lessOrEqual, greaterThan Key, ite
 //func Point(coords ...float64) string {
 //	return Rect(coords, coords)
 //}
-
-// IndexString is a helper function that return true if 'a' is less than 'b'.
-// This is a case-insensitive comparison. Use the IndexBinary() for comparing
-// case-sensitive strings.
-func CaseInsensitiveCompare(a, b string) bool {
-	for i := 0; i < len(a) && i < len(b); i++ {
-		if a[i] >= 'A' && a[i] <= 'Z' {
-			if b[i] >= 'A' && b[i] <= 'Z' {
-				// both are uppercase, do nothing
-				if a[i] < b[i] {
-					return true
-				} else if a[i] > b[i] {
-					return false
-				}
-			} else {
-				// a is uppercase, convert a to lowercase
-				if a[i]+32 < b[i] {
-					return true
-				} else if a[i]+32 > b[i] {
-					return false
-				}
-			}
-		} else if b[i] >= 'A' && b[i] <= 'Z' {
-			// b is uppercase, convert b to lowercase
-			if a[i] < b[i]+32 {
-				return true
-			} else if a[i] > b[i]+32 {
-				return false
-			}
-		} else {
-			// neither are uppercase
-			if a[i] < b[i] {
-				return true
-			} else if a[i] > b[i] {
-				return false
-			}
-		}
-	}
-	return len(a) < len(b)
-}

@@ -43,7 +43,7 @@ func TestPoolSanitize(t *testing.T) {
 				t.Fatal(err)
 			}
 			if n != test.cap {
-				t.Fatalf("rand.Read() = %d; want %d", n, test.cap)
+				t.Fatalf("rand.ReadSortedSet() = %d; want %d", n, test.cap)
 			}
 			for _, b := range bts[:test.cap] {
 				_ = b

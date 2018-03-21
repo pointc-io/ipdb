@@ -21,8 +21,8 @@ var ErrInvalid = errors.New("invalid lz4 data")
 var errEndOfBlock = errors.New("end of block")
 
 // Reader implements the LZ4 frame decoder.
-// The Header is set after the first call to Read().
-// The Header may change between Read() calls in case of concatenated frames.
+// The Header is set after the first call to ReadSortedSet().
+// The Header may change between ReadSortedSet() calls in case of concatenated frames.
 type Reader struct {
 	Pos int64 // position within the source
 	Header
@@ -85,7 +85,7 @@ func (z *Reader) readHeader(first bool) error {
 
 	b := buf[0]
 	if b>>6 != Version {
-		return fmt.Errorf("lz4.Read: invalid version: got %d expected %d", b>>6, Version)
+		return fmt.Errorf("lz4.ReadSortedSet: invalid version: got %d expected %d", b>>6, Version)
 	}
 	z.BlockDependency = b>>5&1 == 0
 	z.BlockChecksum = b>>4&1 > 0
@@ -96,7 +96,7 @@ func (z *Reader) readHeader(first bool) error {
 	bmsID := buf[1] >> 4 & 0x7
 	bSize, ok := bsMapID[bmsID]
 	if !ok {
-		return fmt.Errorf("lz4.Read: invalid block max size: %d", bmsID)
+		return fmt.Errorf("lz4.ReadSortedSet: invalid block max size: %d", bmsID)
 	}
 	z.BlockMaxSize = bSize
 
@@ -112,7 +112,7 @@ func (z *Reader) readHeader(first bool) error {
 	}
 
 	// 	if z.Dict {
-	// 		if err := binary.Read(z.src, binary.LittleEndian, &z.DictID); err != nil {
+	// 		if err := binary.ReadSortedSet(z.src, binary.LittleEndian, &z.DictID); err != nil {
 	// 			return err
 	// 		}
 	// 		z.Pos += 4
@@ -126,7 +126,7 @@ func (z *Reader) readHeader(first bool) error {
 	}
 	z.Pos++
 	if h := byte(z.checksum.Sum32() >> 8 & 0xFF); h != buf[0] {
-		return fmt.Errorf("lz4.Read: invalid header checksum: got %v expected %v", buf[0], h)
+		return fmt.Errorf("lz4.ReadSortedSet: invalid header checksum: got %v expected %v", buf[0], h)
 	}
 
 	z.Header.done = true
@@ -134,10 +134,10 @@ func (z *Reader) readHeader(first bool) error {
 	return nil
 }
 
-// Read decompresses data from the underlying source into the supplied buffer.
+// ReadSortedSet decompresses data from the underlying source into the supplied buffer.
 //
 // Since there can be multiple streams concatenated, Header values may
-// change between calls to Read(). If that is the case, no data is actually read from
+// change between calls to ReadSortedSet(). If that is the case, no data is actually read from
 // the underlying io.Reader, to allow for potential input buffer resizing.
 //
 // Data is buffered if the input buffer is too small, and exhausted upon successive calls.
@@ -155,7 +155,7 @@ func (z *Reader) Read(buf []byte) (n int, err error) {
 		return
 	}
 
-	// exhaust remaining data from previous Read()
+	// exhaust remaining data from previous ReadSortedSet()
 	if len(z.data) > 0 {
 		n = copy(buf, z.data)
 		z.data = z.data[n:]
@@ -246,7 +246,7 @@ func (z *Reader) readBlock(buf []byte, b *block) error {
 	default:
 		bLen = bLen & (1<<31 - 1)
 		if int(bLen) > len(buf) {
-			return fmt.Errorf("lz4.Read: invalid block size: %d", bLen)
+			return fmt.Errorf("lz4.ReadSortedSet: invalid block size: %d", bLen)
 		}
 		b.data = buf[:bLen]
 		b.zdata = buf[:bLen]
@@ -263,7 +263,7 @@ func (z *Reader) readBlock(buf []byte, b *block) error {
 		defer hashPool.Put(xxh)
 		xxh.Write(b.zdata)
 		if h := xxh.Sum32(); h != b.checksum {
-			return fmt.Errorf("lz4.Read: invalid block checksum: got %x expected %x", h, b.checksum)
+			return fmt.Errorf("lz4.ReadSortedSet: invalid block checksum: got %x expected %x", h, b.checksum)
 		}
 	}
 
@@ -299,7 +299,7 @@ func (z *Reader) close() error {
 			return err
 		}
 		if checksum != z.checksum.Sum32() {
-			return fmt.Errorf("lz4.Read: invalid frame checksum: got %x expected %x", z.checksum.Sum32(), checksum)
+			return fmt.Errorf("lz4.ReadSortedSet: invalid frame checksum: got %x expected %x", z.checksum.Sum32(), checksum)
 		}
 	}
 
@@ -330,15 +330,15 @@ var cpus = runtime.GOMAXPROCS(0)
 func (z *Reader) WriteTo(w io.Writer) (n int64, err error) {
 	var buf []byte
 
-	// The initial buffer being nil, the first Read will be only read the compressed frame options.
+	// The initial buffer being nil, the first ReadSortedSet will be only read the compressed frame options.
 	// The buffer can then be sized appropriately to support maximum concurrency decompression.
-	// If multiple frames are concatenated, Read() will return with no data decompressed but with
+	// If multiple frames are concatenated, ReadSortedSet() will return with no data decompressed but with
 	// potentially changed options. The buffer will be resized accordingly, always trying to
 	// maximize concurrency.
 	for {
 		nsize := 0
 		// the block max size can change if multiple streams are concatenated.
-		// Check it after every Read().
+		// Check it after every ReadSortedSet().
 		if z.BlockDependency {
 			// in case of dependency, we cannot decompress concurrently,
 			// so allocate the minimum buffer + window size

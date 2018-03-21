@@ -71,11 +71,11 @@ func JSONProjector(path string) KeyProjector {
 		case gjson.Null:
 			return Nil
 		case gjson.JSON:
-			return NilKey{}
+			return Nil
 		case gjson.True:
-			return TrueKey{}
+			return True
 		case gjson.False:
-			return FalseKey{}
+			return False
 		case gjson.Number:
 			return FloatKey(result.Num)
 		default:
@@ -174,6 +174,10 @@ func IndexAny(desc bool) IndexOpts {
 //
 func IndexSpatial() IndexOpts {
 	return IncludeRect
+}
+
+func StringIndexer() *IndexField {
+	return NewIndexer("", IndexString(false), ValueProjector)
 }
 
 //
@@ -376,13 +380,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 	// likely path of a single field index.
 	switch key := val.(type) {
 	default:
-		return &AnyItem{
-			indexItem: indexItem{
-				idx:   index,
-				value: item,
-			},
-			key: key,
-		}
+		return nil
 	case IntKey:
 		if i.opts&IncludeInt != 0 {
 			if i.opts&SortDesc != 0 {
@@ -391,7 +389,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 						idx:   index,
 						value: item,
 					},
-					Key: IntDescKey(key),
+					key: IntDescKey(key),
 				}
 			} else {
 				return &intItem{
@@ -399,7 +397,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 						idx:   index,
 						value: item,
 					},
-					Key: key,
+					key: key,
 				}
 			}
 		} else {
@@ -412,7 +410,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 					idx:   index,
 					value: item,
 				},
-				Key: key,
+				key: key,
 			}
 		} else {
 			return nil
@@ -426,7 +424,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 							idx:   index,
 							value: item,
 						},
-						Key: IntDescKey(key),
+						key: IntDescKey(key),
 					}
 				} else {
 					return &intItem{
@@ -434,7 +432,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 							idx:   index,
 							value: item,
 						},
-						Key: IntKey(key),
+						key: IntKey(key),
 					}
 				}
 			} else {
@@ -444,7 +442,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 							idx:   index,
 							value: item,
 						},
-						Key: FloatDescKey(key),
+						key: FloatDescKey(key),
 					}
 				} else {
 					return &floatItem{
@@ -452,7 +450,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 							idx:   index,
 							value: item,
 						},
-						Key: key,
+						key: key,
 					}
 				}
 			}
@@ -472,7 +470,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 							idx:   index,
 							value: item,
 						},
-						Key: StringCIDescKey(key),
+						key: StringCIDescKey(key),
 					}
 				} else {
 					return &stringDescItem{
@@ -480,7 +478,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 							idx:   index,
 							value: item,
 						},
-						K: StringDescKey(key),
+						key: StringDescKey(key),
 					}
 				}
 			} else {
@@ -490,7 +488,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 							idx:   index,
 							value: item,
 						},
-						Key: StringCIKey(key),
+						key: StringCIKey(key),
 					}
 				} else {
 					return &stringItem{
@@ -498,7 +496,7 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 							idx:   index,
 							value: item,
 						},
-						K: key,
+						key: key,
 					}
 				}
 			}
@@ -508,12 +506,11 @@ func (i *IndexField) Index(index *Index, item *ValueItem) IndexItem {
 
 	case NilKey:
 		if i.opts&IncludeNil != 0 {
-			return &AnyItem{
+			return &nilItem{
 				indexItem: indexItem{
 					idx:   index,
 					value: item,
 				},
-				key: key,
 			}
 		} else {
 			return nil
@@ -588,12 +585,12 @@ func (i *CompositeIndex) Index(index *Index, item *ValueItem) IndexItem {
 		if key2 == nil || key2 == SkipKey {
 			return nil
 		}
-		return &composite2Item{
+		return &key2Item{
 			indexItem: indexItem{
 				idx:   index,
 				value: item,
 			},
-			K: Key2{key, key2},
+			key: Key2{key, key2},
 		}
 
 	default:

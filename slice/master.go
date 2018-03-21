@@ -11,6 +11,7 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/pointc-io/sliced"
+	"github.com/pointc-io/sliced/api"
 
 	cmd "github.com/pointc-io/sliced/command"
 	"github.com/pointc-io/sliced/index/btree"
@@ -92,13 +93,43 @@ func NewMaster(host, path string) *SliceMaster {
 	return d
 }
 
-func (d *SliceMaster) SliceForKey(key string) *Slice {
+func (m *SliceMaster) Master() api.Slice {
+	return m.master
+}
+
+func (d *SliceMaster) SliceOf(key string) api.Slice {
 	slot := redcon.Slot(key)
 	d.mu.RLock()
 	idx := slot % len(d.slices)
-	shard := d.slices[idx]
+	slice := d.slices[idx]
+	d.mu.RUnlock()
+	return slice
+}
+
+func (d *SliceMaster) SliceFor(id int) api.Slice {
+	var shard *Slice
+	d.mu.RLock()
+	if id == -1 {
+		shard = d.master
+		d.mu.RUnlock()
+		return shard
+	}
+	if id < 0 || id >= len(d.slices) {
+		d.mu.RUnlock()
+		return nil
+	}
+	shard = d.slices[id]
 	d.mu.RUnlock()
 	return shard
+}
+
+func (d *SliceMaster) sliceForKey(key string) *Slice {
+	slot := redcon.Slot(key)
+	d.mu.RLock()
+	idx := slot % len(d.slices)
+	slice := d.slices[idx]
+	d.mu.RUnlock()
+	return slice
 }
 
 func (d *SliceMaster) SliceCount() int {
@@ -133,7 +164,7 @@ func (d *SliceMaster) SliceForSlot(id int) *Slice {
 	return shard
 }
 
-func (d *SliceMaster) shardPath(id int) (string, error) {
+func (d *SliceMaster) slicePath(id int) (string, error) {
 	if d.path == ":memory:" {
 		return d.path, nil
 	} else {
@@ -151,7 +182,7 @@ func (d *SliceMaster) OnStart() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	clusterPath, err := d.shardPath(-1)
+	clusterPath, err := d.slicePath(-1)
 
 	if err != nil {
 		d.Logger.Fatal().Err(err).Msgf("failed to mkdirs for \"%s\"", clusterPath)
@@ -168,7 +199,7 @@ func (d *SliceMaster) OnStart() error {
 
 	if d.master.set.Length() == 0 {
 		for i := 0; i < 1; i++ {
-			shardPath, err := d.shardPath(i)
+			shardPath, err := d.slicePath(i)
 
 			if err != nil {
 				d.Logger.Fatal().Err(err).Msgf("failed to mkdirs for \"%s\"", clusterPath)
@@ -217,76 +248,17 @@ func (d *SliceMaster) Commit(ctx *cmd.Context) {
 
 	//LOOP:
 	for key, set := range ctx.Changes {
-		shard := d.SliceForSlot(key)
-		if shard == nil {
+		slice := d.SliceForSlot(key)
+		if slice == nil {
 			for i := 0; i < len(set.Cmds); i++ {
-				ctx.Out = redcon.AppendError(ctx.Out, fmt.Sprintf("ERR shard %d not on node", key))
+				ctx.Out = redcon.AppendError(ctx.Out, fmt.Sprintf("ERR slice %d not on node", key))
 			}
 		} else {
-			ctx.Set = shard.GetSet()
+			slice.Commit(ctx, set)
+			ctx.Set = nil
 
-			if ctx.Conn.Durability() == cmd.High {
-				future := shard.raft.Apply(set.Data, raftTimeout)
-
-				var err error
-				if err = future.Error(); err != nil {
-					for i := 0; i < len(set.Cmds); i++ {
-						ctx.Out = ctx.AppendError("ERR " + err.Error())
-					}
-				} else if resp := future.Response(); resp != nil {
-					if buf, ok := resp.([]byte); ok {
-						ctx.Out = append(ctx.Out, buf...)
-					} else {
-						switch t := resp.(type) {
-						case string:
-							ctx.Out = ctx.AppendBulkString(t)
-						default:
-							for i := 0; i < len(set.Cmds); i++ {
-								ctx.Out = ctx.AppendError(fmt.Sprintf("ERR apply return type %v", t))
-							}
-						}
-					}
-				} else {
-					for i := 0; i < len(set.Cmds); i++ {
-						ctx.Out = ctx.AppendOK()
-					}
-				}
-			} else {
-				//tx, err := shard.db.Begin(true)
-
-				//if err != nil {
-				//	for i := 0; i < len(set.Cmds); i++ {
-				//		ctx.Out = ctx.AppendError(fmt.Sprintf("ERR failed to start tx %v", err.Error()))
-				//	}
-				//	delete(ctx.Changes, key)
-				//	continue LOOP
-				//}
-
-				//begin := len(ctx.Out)
-				//ctx.SliceMaster = shard.db
-				//ctx.Tx = tx
-
-				for i := 0; i < len(set.Cmds); i++ {
-					ctx.Out = set.Cmds[i].Invoke(ctx)
-				}
-
-				//err = tx.Commit()
-				//if err != nil {
-				//	ctx.Out = ctx.Out[:begin]
-				//	for i := 0; i < len(set.Cmds); i++ {
-				//		ctx.Out = redcon.AppendError(ctx.Out, "ERR "+err.Error())
-				//	}
-				//} else {
-				// Apply inside lock.
-				shard.raft.Apply(set.Data, raftTimeout)
-				//}
-
-				// Cleanup
-				//ctx.SortedSet = nil
-
-				// Remove change set.
-				delete(ctx.Changes, key)
-			}
+			// Remove change set.
+			delete(ctx.Changes, key)
 		}
 	}
 }
@@ -349,7 +321,7 @@ func (c *SetCmd) Invoke(ctx *cmd.Context) []byte {
 		if err == sliced.ErrNotFound {
 			return ctx.AppendNull()
 		} else {
-			return ctx.AppendError("ERR data not available " + err.Error())
+			return ctx.AppendError("ERR data not available: " + err.Error())
 		}
 	} else {
 		if replaced {
@@ -390,13 +362,13 @@ func (d *SliceMaster) Parse(ctx *cmd.Context) cmd.Command {
 		if len(ctx.Args) != 2 {
 			return cmd.ERR("ERR 1 parameter expected")
 		} else {
-			shard := d.SliceForKey(key)
+			shard := d.sliceForKey(key)
 			if shard == nil {
 				return cmd.ERR(fmt.Sprintf("ERR shard not on node"))
 			} else {
 				var _cmd cmd.Command
-				shard.RunSet(key, func(set *item.SortedSet) {
-					val, err := set.Get((item.StringKey)(key))
+				shard.ReadSortedSet(key, func(set *item.SortedSet) {
+					val, err := set.Get(item.StringKey(key))
 					if err != nil {
 						if err == sliced.ErrNotFound {
 							_cmd = cmd.RAW(redcon.AppendNull(nil))
@@ -418,31 +390,33 @@ func (d *SliceMaster) Parse(ctx *cmd.Context) cmd.Command {
 
 		value := string(args[2])
 
-		shard := d.SliceForKey(key)
+		shard := d.sliceForKey(key)
 		if shard == nil {
 			return cmd.ERR(fmt.Sprintf("ERR shard not on node"))
 		} else {
-			ctx.ShardID = shard.id
-			var _cmd cmd.Command
-			shard.RunSet(key, func(set *item.SortedSet) {
-				//return &SetCmd{Key: key, Value: value}
-				val, replaced, err := shard.GetSet().Set(item.StringKey(key), value, 0)
-				if err != nil {
-					if err == sliced.ErrNotFound {
-						_cmd = cmd.RAW(redcon.AppendNull(nil))
-					} else {
-						_cmd = cmd.ERR("ERR data not available " + err.Error())
-					}
-				} else {
-					if replaced {
-						_cmd = cmd.BulkString(val)
-					} else {
-						_cmd = cmd.RAW(redcon.AppendNull(nil))
-					}
-				}
-			})
-			return _cmd
-
+			ctx.SliceID = shard.ID()
+			return &SetCmd{
+				Key:      key,
+				Value:    value,
+			}
+			//var _cmd cmd.Command
+			//shard.WriteSortedSet(key, func(set *item.SortedSet) {
+			//	val, replaced, err := set.Set(item.StringKey(key), value, 0)
+			//	if err != nil {
+			//		if err == sliced.ErrNotFound {
+			//			_cmd = cmd.RAW(redcon.AppendNull(nil))
+			//		} else {
+			//			_cmd = cmd.ERR("ERR data not available " + err.Error())
+			//		}
+			//	} else {
+			//		if replaced {
+			//			_cmd = cmd.BulkString(val)
+			//		} else {
+			//			_cmd = cmd.RAW(redcon.AppendNull(nil))
+			//		}
+			//	}
+			//})
+			//return _cmd
 		}
 
 	case delName:

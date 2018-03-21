@@ -51,7 +51,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 )
 
 // Item represents a single object in the tree.
@@ -81,9 +80,8 @@ var (
 // FreeList.
 // Two Btrees using the same freelist are safe for concurrent write access.
 type FreeList struct {
-	mu       sync.Mutex
+	//mu       sync.Mutex
 	freelist []*node
-	pool     *sync.Pool
 }
 
 // NewFreeList creates a new free list.
@@ -91,36 +89,31 @@ type FreeList struct {
 func NewFreeList(size int) *FreeList {
 	return &FreeList{
 		freelist: make([]*node, 0, size),
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return new(node)
-			},
-		},
 	}
 }
 
 func (f *FreeList) newNode() (n *node) {
 	//n = f.pool.Get().(*node)
-	f.mu.Lock()
+	//f.mu.Lock()
 	index := len(f.freelist) - 1
 	if index < 0 {
-		f.mu.Unlock()
+		//f.mu.Unlock()
 		return new(node)
 	}
 	n = f.freelist[index]
 	f.freelist[index] = nil
 	f.freelist = f.freelist[:index]
-	f.mu.Unlock()
+	//f.mu.Unlock()
 	return
 }
 
 func (f *FreeList) freeNode(n *node) {
 	//f.pool.Put(n)
-	f.mu.Lock()
+	//f.mu.Lock()
 	if len(f.freelist) < cap(f.freelist) {
 		f.freelist = append(f.freelist, n)
 	}
-	f.mu.Unlock()
+	//f.mu.Unlock()
 }
 
 // ItemIterator allows callers of Ascend* to iterate in-order over portions of
@@ -587,7 +580,7 @@ func (n *node) print(w io.Writer, level int) {
 // removal, and iteration.
 //
 // Write operations are not safe for concurrent mutation by multiple
-// goroutines, but Read operations are.
+// goroutines, but ReadSortedSet operations are.
 type BTree struct {
 	degree int
 	length int
@@ -620,7 +613,7 @@ type copyOnWriteContext struct {
 //
 // The internal tree structure of b is marked read-only and shared between t and
 // t2.  Writes to both t and t2 use copy-on-write logic, creating new nodes
-// whenever one of b's original nodes would have been modified.  Read operations
+// whenever one of b's original nodes would have been modified.  ReadSortedSet operations
 // should have no performance degredation.  Write operations for both t and t2
 // will initially experience minor slow-downs caused by additional allocs and
 // copies due to the aforementioned copy-on-write logic, but should converge to

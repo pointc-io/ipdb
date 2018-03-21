@@ -6,9 +6,9 @@ import (
 	"os/user"
 	"path/filepath"
 
-	"github.com/rs/zerolog"
-	"github.com/rcrowley/go-metrics"
 	"github.com/blang/semver"
+	"github.com/rcrowley/go-metrics"
+	"github.com/rs/zerolog"
 )
 
 var (
@@ -47,6 +47,11 @@ var (
 
 	// ErrTxIterating is returned when Set or Delete are called while iterating.
 	ErrTxIterating = errors.New("tx is iterating")
+
+	ErrLogNotShrinkable    = errors.New("log not shrinkable")
+	ErrShardNotExists      = errors.New("shard not exists")
+	ErrNotLeader           = errors.New("not leader")
+	ErrNotLeaderOrFollower = errors.New("not leader or follower")
 )
 
 var Name = "sliced"
@@ -70,6 +75,8 @@ func init() {
 	}
 
 	Version, err = semver.Make(VersionStr)
+
+	PluginCtx = &context{}
 }
 
 func CLILogger() zerolog.Logger {

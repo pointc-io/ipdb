@@ -10,7 +10,6 @@ package slice
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -21,6 +20,7 @@ import (
 	"github.com/hashicorp/raft"
 	"github.com/pointc-io/sliced"
 	cmd "github.com/pointc-io/sliced/command"
+	"github.com/pointc-io/sliced/index/btree"
 	"github.com/pointc-io/sliced/item"
 	"github.com/pointc-io/sliced/service"
 	"github.com/pointc-io/sliced/slice/store"
@@ -32,14 +32,8 @@ const (
 	raftTimeout         = 10 * time.Second
 )
 
-var (
-	ErrLogNotShrinkable = errors.New("ERR log not shrinkable")
-	ErrShardNotExists   = errors.New("ERR shard not exists")
-	ErrNotLeader        = errors.New("ERR not leader")
-)
-
 type Applier interface {
-	Apply(shard *Slice, l *raft.Log) interface{}
+	Apply(slice *Slice, l *raft.Log) interface{}
 }
 
 // Slice is a partition of the total keyspace, where all changes are made via Raft consensus.
@@ -57,21 +51,35 @@ type Slice struct {
 	enableSingle bool
 	localID      string
 
-	mu   sync.RWMutex
-	m    map[string]string // The key-value store for the system.
-	set  *item.SortedSet
+	mu sync.RWMutex
+
+	// Slice level btree freelist. Guarded by slice lock.
+	freelist *btree.FreeList
+	// Default SortedSet (SET, GET)
+	set *item.SortedSet
+	// Keyed SortedSet
 	sets map[string]*item.SortedSet
 
-	raft      *raft.Raft // The consensus mechanism
-	snapshots raft.SnapshotStore
-	transport *RESPTransport
-	trans     raft.Transport
-	store     bigStore
+	// All streams are keyed
+	streams map[string]*item.SortedSet
 
-	applier Applier
+	// All queues are keyed
+	queues map[string]*item.SortedSet
 
+	// Raft
+	raft       *raft.Raft // The consensus mechanism
+	snapshots  raft.SnapshotStore
+	transport  *RESPTransport
+	trans      raft.Transport
+	store      bigStore
 	observerCh chan raft.Observation
 	observer   *raft.Observer
+
+	applier Applier
+}
+
+func (s *Slice) ID() int {
+	return s.id
 }
 
 // bigStore represents a raft store that conforms to
@@ -105,16 +113,18 @@ func NewSlice(id int, enableSingle bool, path, localID string, applier Applier) 
 		localID:      localID,
 		enableSingle: enableSingle,
 		applier:      applier,
-		m:            make(map[string]string),
+		freelist:     btree.NewFreeList(16384),
 		sets:         make(map[string]*item.SortedSet),
 		observerCh:   make(chan raft.Observation),
 	}
 	var name string
 	if s.id < 0 {
-		name = "clusterdb"
+		name = "master"
 	} else {
-		name = fmt.Sprintf("shard-%d", s.id)
+		name = fmt.Sprintf("slice-%d", s.id)
 	}
+
+	s.set = item.NewSortedSetWithFreelist(s.freelist)
 
 	s.BaseService = *service.NewBaseService(sliced.Logger, name, s)
 	return s
@@ -189,7 +199,7 @@ func (s *Slice) OnStart() error {
 	if s.id < 0 {
 		logname = "master"
 	} else {
-		logname = fmt.Sprintf("shard-%d-log", s.id)
+		logname = fmt.Sprintf("slice-%d-log", s.id)
 	}
 	// Create the log store and stable store.
 	s.store, err = raftfastlog.NewFastLogStore(
@@ -262,17 +272,58 @@ func (s *Slice) OnStop() {
 	close(s.observerCh)
 }
 
-func (s *Slice) GetSet() *item.SortedSet {
+func (s *Slice) ReadSortedSet(key string, fn func(set *item.SortedSet)) error {
+	//switch s.raft.State() {
+	//case raft.Leader, raft.Follower:
+	//default:
+	//	return sliced.ErrNotLeaderOrFollower
+	//}
+
 	s.mu.RLock()
-	set := s.set
+	//if key == "" {
+		fn(s.set)
+	//} else {
+	//	set, ok := s.sets[key]
+	//	if !ok {
+	//		fn(nil)
+	//	} else {
+	//		fn(set)
+	//	}
+	//}
 	s.mu.RUnlock()
-	return set
+	return nil
 }
 
-func (s *Slice) RunSet(key string, fn func(set *item.SortedSet)) {
-	s.mu.RLock()
+func (s *Slice) WriteSortedSet(key string, fn func(set *item.SortedSet)) error {
+	if s.raft.State() != raft.Leader {
+		return sliced.ErrNotLeader
+	}
+
+	s.mu.Lock()
 	fn(s.set)
-	s.mu.RUnlock()
+	//var set *item.SortedSet
+	//if key == "" {
+	//	set = s.set
+	//	fn(set)
+	//} else {
+	//	var ok bool
+	//	set, ok = s.sets[key]
+	//	if !ok {
+	//		set = item.NewSortedSetWithFreelist(s.freelist)
+	//	}
+	//	fn(set)
+	//	if !ok {
+	//		if set.Length() > 0 {
+	//			s.sets[key] = set
+	//		}
+	//	} else {
+	//		if set.Length() == 0 {
+	//			delete(s.sets, key)
+	//		}
+	//	}
+	//}
+	s.mu.Unlock()
+	return nil
 }
 
 type raftLoggerWriter struct {
@@ -356,7 +407,7 @@ func (s *Slice) Snapshot() error {
 
 // "SHRINK" client command.
 func (c *Slice) Shrink() error {
-	return ErrLogNotShrinkable
+	return sliced.ErrLogNotShrinkable
 }
 
 // "RAFTSHRINK" client command.
@@ -368,7 +419,7 @@ func (s *Slice) ShrinkLog() error {
 		}
 		return nil
 	}
-	return ErrLogNotShrinkable
+	return sliced.ErrLogNotShrinkable
 }
 
 // Only for RESPTransport RAFTAPPEND
@@ -396,13 +447,6 @@ func (s *Slice) Stats() map[string]string {
 
 func (s *Slice) State() raft.RaftState {
 	return s.raft.State()
-}
-
-func (s *Slice) Update(cmd string) (interface{}, error) {
-	if s.raft.State() != raft.Leader {
-		return nil, ErrNotLeader
-	}
-	return nil, nil
 }
 
 // Join joins a node, identified by nodeID and located at addr, to this store.
@@ -480,3 +524,45 @@ func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 }
 
 func (f *fsmSnapshot) Release() {}
+
+
+func (s *Slice) Commit(ctx *cmd.Context, changes *cmd.ChangeSet) {
+	s.WriteSortedSet("", func(set *item.SortedSet) {
+		ctx.Set = set
+
+		if ctx.Conn.Durability() == cmd.High {
+			future := s.raft.Apply(changes.Data, raftTimeout)
+
+			var err error
+			if err = future.Error(); err != nil {
+				for i := 0; i < len(changes.Cmds); i++ {
+					ctx.Out = ctx.AppendError("ERR " + err.Error())
+				}
+			} else if resp := future.Response(); resp != nil {
+				if buf, ok := resp.([]byte); ok {
+					ctx.Out = append(ctx.Out, buf...)
+				} else {
+					switch t := resp.(type) {
+					case string:
+						ctx.Out = ctx.AppendBulkString(t)
+					default:
+						for i := 0; i < len(changes.Cmds); i++ {
+							ctx.Out = ctx.AppendError(fmt.Sprintf("ERR apply return type %v", t))
+						}
+					}
+				}
+			} else {
+				for i := 0; i < len(changes.Cmds); i++ {
+					ctx.Out = ctx.AppendOK()
+				}
+			}
+		} else {
+			for i := 0; i < len(changes.Cmds); i++ {
+				ctx.Out = changes.Cmds[i].Invoke(ctx)
+			}
+
+			// Apply inside lock.
+			s.raft.Apply(changes.Data, raftTimeout)
+		}
+	})
+}
