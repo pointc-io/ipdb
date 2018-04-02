@@ -11,6 +11,7 @@ func main() {
 	//mapping := bleve.NewIndexMapping()
 	//index, err := bleve.New("example.bleve", mapping)
 	index, err := bleve.Open("example.bleve")
+	bleve.NewMemOnly()
 	if err != nil {
 		fmt.Println(err)
 		return

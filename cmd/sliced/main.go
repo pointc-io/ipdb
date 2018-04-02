@@ -151,7 +151,7 @@ func defaultPath() string {
 	if err == nil {
 		return ""
 	}
-	return filepath.Join(usr.HomeDir, ".butterd")
+	return filepath.Join(usr.HomeDir, ".sliced")
 }
 
 // Viper init
